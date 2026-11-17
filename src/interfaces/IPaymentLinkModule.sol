@@ -116,6 +116,10 @@ interface IPaymentLinkModule is IBridgeModule {
     error InvalidSignatures();
     /// @notice Reverts when the claim signature was not produced by the link's key.
     error InvalidClaimSignature();
+    /// @notice Reverts when the request was not signed by the link's key.
+    error InvalidLinkSignature();
+    /// @notice Reverts when a claim or cancel would pay less than the minimum its signer agreed to.
+    error PayoutBelowMinimum();
     /// @notice Reverts when `linkSigner` has already been used by any link.
     error LinkSignerUsed();
     /// @notice Reverts when the fee the owners signed differs from the current fee.
@@ -156,10 +160,12 @@ interface IPaymentLinkModule is IBridgeModule {
      * @param amount The amount to escrow.
      * @param linkSigner The address of the link's private key; the link ID.
      * @param feeBps The fee the owners agreed to; must equal the current fee.
+     * @param linkSignature The link key's signature over `requestLinkDigest`, proving the
+     *        request comes from whoever holds that key.
      * @param signers Safe owners that signed `requestLinkDigest`.
      * @param signatures Signatures corresponding to `signers`.
      */
-    function requestLink(address safe, address token, uint256 amount, address linkSigner, uint16 feeBps, address[] calldata signers, bytes[] calldata signatures) external;
+    function requestLink(address safe, address token, uint256 amount, address linkSigner, uint16 feeBps, bytes calldata linkSignature, address[] calldata signers, bytes[] calldata signatures) external;
 
     /**
      * @notice Processes the matured CashModule withdrawal for the safe's pending link and marks it funded.
@@ -169,21 +175,26 @@ interface IPaymentLinkModule is IBridgeModule {
 
     /**
      * @notice Pays a funded link to `recipient`, authorized by a signature from the link's key over
-     *         `claimDigest(linkSigner, recipient)`.
+     *         `claimDigest(linkSigner, recipient, minAmount)`. Reverts if `recipient` would receive
+     *         less than `minAmount` after the fee.
      * @param linkSigner The link ID.
      * @param recipient The address to pay.
-     * @param signature The link key's signature over `claimDigest(linkSigner, recipient)`.
+     * @param minAmount The least `recipient` must receive after the fee.
+     * @param signature The link key's signature over `claimDigest(linkSigner, recipient, minAmount)`.
      */
-    function claim(address linkSigner, address recipient, bytes calldata signature) external;
+    function claim(address linkSigner, address recipient, uint256 minAmount, bytes calldata signature) external;
 
     /**
      * @notice Cancels a requested or funded link, signed by the safe's current owners. A funded
-     *         link's escrow returns to the safe.
+     *         link's escrow returns to the safe. Reverts if the safe would get back less than
+     *         `minRefund`; a requested link's tokens never left the safe, so its refund counts as
+     *         the full link amount.
      * @param linkSigner The link ID.
-     * @param signers Safe owners that signed `cancelLinkDigest`.
+     * @param minRefund The least the safe must get back.
+     * @param signers Safe owners that signed `cancelLinkDigest(linkSigner, minRefund)`.
      * @param signatures Signatures corresponding to `signers`.
      */
-    function cancel(address linkSigner, address[] calldata signers, bytes[] calldata signatures) external;
+    function cancel(address linkSigner, uint256 minRefund, address[] calldata signers, bytes[] calldata signatures) external;
 
     /**
      * @notice Marks the safe's pending link `RequestCancelled` when CashModule no longer holds its
@@ -253,12 +264,13 @@ interface IPaymentLinkModule is IBridgeModule {
      * @notice Returns the EIP-712 digest the link key signs to claim to `recipient`.
      * @param linkSigner The link ID.
      * @param recipient The recipient bound into the signature.
+     * @param minAmount The least `recipient` must receive after the fee.
      * @return The EIP-712 typed-data digest.
      */
-    function claimDigest(address linkSigner, address recipient) external view returns (bytes32);
+    function claimDigest(address linkSigner, address recipient, uint256 minAmount) external view returns (bytes32);
 
     /**
-     * @notice Returns the EIP-191 digest the safe's owners sign for `requestLink`, at the safe's current module nonce.
+     * @notice Returns the EIP-191 digest the safe's owners and the link key sign for `requestLink`, at the safe's current module nonce.
      * @param safe The EtherFiSafe sending the funds.
      * @param token The ERC-20 to escrow.
      * @param amount The amount to escrow.
@@ -271,9 +283,10 @@ interface IPaymentLinkModule is IBridgeModule {
     /**
      * @notice Returns the EIP-191 digest the safe's owners sign for `cancel`, at the link safe's current module nonce.
      * @param linkSigner The link ID.
+     * @param minRefund The least the safe must get back.
      * @return The digest to sign.
      */
-    function cancelLinkDigest(address linkSigner) external view returns (bytes32);
+    function cancelLinkDigest(address linkSigner, uint256 minRefund) external view returns (bytes32);
 
     /**
      * @notice Returns the EIP-712 domain separator used for claim signatures.

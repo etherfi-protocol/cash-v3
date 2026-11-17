@@ -5,6 +5,7 @@ import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/I
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { ReentrancyGuardTransientUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardTransientUpgradeable.sol";
+import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { Vm } from "forge-std/Vm.sol";
 
@@ -103,7 +104,9 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
     function test_cancelLinkDigest_matchesSpecFormula() public {
         (address linkSigner,) = _newLinkKey();
         _request(address(usdc), AMOUNT, linkSigner);
-        assertEq(plm.cancelLinkDigest(linkSigner), _specCancelDigest(address(plm), address(safe), linkSigner, 1));
+        assertEq(plm.cancelLinkDigest(linkSigner, 0), _specCancelDigest(address(plm), address(safe), linkSigner, 0, 1));
+        assertEq(plm.cancelLinkDigest(linkSigner, AMOUNT), _specCancelDigest(address(plm), address(safe), linkSigner, AMOUNT, 1));
+        assertTrue(plm.cancelLinkDigest(linkSigner, 0) != plm.cancelLinkDigest(linkSigner, 1), "minRefund is bound");
     }
 
     function test_claimDigest_isEip712OverClaimStruct() public {
@@ -111,9 +114,11 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(plm.DOMAIN_SEPARATOR(), domain);
 
         address linkSigner = makeAddr("someLink");
-        bytes32 structHash = keccak256(abi.encode(keccak256("Claim(address linkSigner,address recipient)"), linkSigner, externalRecipient));
-        assertEq(plm.claimDigest(linkSigner, externalRecipient), keccak256(abi.encodePacked("\x19\x01", domain, structHash)));
-        assertEq(plm.CLAIM_TYPEHASH(), keccak256("Claim(address linkSigner,address recipient)"));
+        bytes32 typeHash = keccak256("Claim(address linkSigner,address recipient,uint256 minAmount)");
+        bytes32 structHash = keccak256(abi.encode(typeHash, linkSigner, externalRecipient, AMOUNT));
+        assertEq(plm.claimDigest(linkSigner, externalRecipient, AMOUNT), keccak256(abi.encodePacked("\x19\x01", domain, structHash)));
+        assertEq(plm.CLAIM_TYPEHASH(), typeHash);
+        assertTrue(plm.claimDigest(linkSigner, externalRecipient, 0) != plm.claimDigest(linkSigner, externalRecipient, 1), "minAmount is bound");
     }
 
     // ---- requestLink ----
@@ -227,20 +232,20 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(bytes32(0));
 
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        plm.requestLink(address(safe), address(usdc), AMOUNT, address(0), FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, address(0), FEE_BPS, _linkSig(address(safe), address(usdc), AMOUNT, address(0), FEE_BPS), signers, sigs);
 
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        plm.requestLink(address(safe), address(usdc), 0, linkSigner, FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), address(usdc), 0, linkSigner, FEE_BPS, _linkSig(address(usdc), 0, linkSigner), signers, sigs);
 
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        plm.requestLink(address(safe), address(0), AMOUNT, linkSigner, FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), address(0), AMOUNT, linkSigner, FEE_BPS, _linkSig(address(0), AMOUNT, linkSigner), signers, sigs);
     }
 
     function test_requestLink_revertsForNonSafe() public {
         (address linkSigner,) = _newLinkKey();
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(bytes32(0));
         vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
-        plm.requestLink(makeAddr("notASafe"), address(usdc), AMOUNT, linkSigner, FEE_BPS, signers, sigs);
+        plm.requestLink(makeAddr("notASafe"), address(usdc), AMOUNT, linkSigner, FEE_BPS, _linkSig(makeAddr("notASafe"), address(usdc), AMOUNT, linkSigner, FEE_BPS), signers, sigs);
     }
 
     function test_requestLink_revertsOnFeeMismatch() public {
@@ -248,7 +253,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         uint16 staleFee = FEE_BPS + 1;
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(usdc), AMOUNT, linkSigner, staleFee));
         vm.expectRevert(IPaymentLinkModule.FeeMismatch.selector);
-        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, staleFee, signers, sigs);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, staleFee, _linkSig(address(safe), address(usdc), AMOUNT, linkSigner, staleFee), signers, sigs);
     }
 
     function test_requestLink_revertsWhileLinkPending() public {
@@ -258,7 +263,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address second,) = _newLinkKey();
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(usdc), AMOUNT, second, FEE_BPS));
         vm.expectRevert(IPaymentLinkModule.PendingLinkExists.selector);
-        plm.requestLink(address(safe), address(usdc), AMOUNT, second, FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, second, FEE_BPS, _linkSig(address(usdc), AMOUNT, second), signers, sigs);
     }
 
     function test_requestLink_revertsWhileCashModuleWithdrawalPending() public {
@@ -271,24 +276,27 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address linkSigner,) = _newLinkKey();
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS));
         vm.expectRevert(IPaymentLinkModule.PendingWithdrawalExists.selector);
-        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, _linkSig(address(usdc), AMOUNT, linkSigner), signers, sigs);
     }
 
     function test_requestLink_revertsOnInvalidSignatures() public {
         (address linkSigner,) = _newLinkKey();
         bytes32 digest = plm.requestLinkDigest(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS);
+        bytes memory linkSig = _linkSig(address(usdc), AMOUNT, linkSigner);
 
         // One valid owner signature and one over a different digest: below threshold.
-        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(digest);
-        (, bytes[] memory wrong) = _ownerSigs(keccak256("something else"));
-        sigs[1] = wrong[1];
-        vm.expectRevert(IPaymentLinkModule.InvalidSignatures.selector);
-        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, signers, sigs);
+        {
+            (address[] memory signers, bytes[] memory sigs) = _ownerSigs(digest);
+            (, bytes[] memory wrong) = _ownerSigs(keccak256("something else"));
+            sigs[1] = wrong[1];
+            vm.expectRevert(IPaymentLinkModule.InvalidSignatures.selector);
+            plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, linkSig, signers, sigs);
+        }
 
         // A non-owner signer is rejected by the safe itself.
         (address[] memory badSigners, bytes[] memory badSigs) = _sigs(digest, owner1, owner1Pk, notOwner, notOwnerPk);
         vm.expectRevert(abi.encodeWithSelector(EtherFiSafeErrors.InvalidSigner.selector, 1));
-        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, badSigners, badSigs);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, linkSig, badSigners, badSigs);
     }
 
     function test_requestLink_signatureBoundToNonce() public {
@@ -301,7 +309,59 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         _cancel(linkA);
 
         vm.expectRevert(IPaymentLinkModule.InvalidSignatures.selector);
-        plm.requestLink(address(safe), address(usdc), AMOUNT, linkB, FEE_BPS, signersB, sigsB);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, linkB, FEE_BPS, _linkSig(address(usdc), AMOUNT, linkB), signersB, sigsB);
+    }
+
+    function test_requestLink_requiresLinkKeySignature() public {
+        (address linkSigner, uint256 linkPk) = _newLinkKey();
+        bytes32 digest = plm.requestLinkDigest(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS);
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(digest);
+
+        // Owners who only know the signer address cannot take it: any other key, a malformed
+        // signature or no signature fails, even with valid owner signatures.
+        (, uint256 otherPk) = _newLinkKey();
+        bytes[] memory bad = new bytes[](3);
+        bad[0] = _rawSig(otherPk, digest);
+        bad[1] = hex"1234";
+        bad[2] = "";
+        for (uint256 i = 0; i < bad.length; i++) {
+            vm.expectRevert(IPaymentLinkModule.InvalidLinkSignature.selector);
+            plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, bad[i], signers, sigs);
+        }
+
+        // The rejected attempts reserved nothing and used no nonce: the key holder's request goes through.
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.None));
+        assertEq(plm.getNonce(address(safe)), 0);
+        vm.prank(relayer);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, _rawSig(linkPk, digest), signers, sigs);
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Requested));
+        assertEq(plm.getPendingLink(address(safe)), linkSigner);
+    }
+
+    function test_requestLink_linkSignatureBoundToRequest() public {
+        (address linkSigner, uint256 linkPk) = _newLinkKey();
+        bytes32 digest = plm.requestLinkDigest(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS);
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(digest);
+        bytes32 inner = keccak256(abi.encodePacked(keccak256("requestLink"), block.chainid, address(plm), uint256(0), address(safe), abi.encode(address(usdc), AMOUNT, linkSigner, FEE_BPS)));
+        assertEq(MessageHashUtils.toEthSignedMessageHash(inner), digest);
+
+        // Signatures by the right key over anything but this request's digest are rejected.
+        bytes[] memory wrong = new bytes[](6);
+        wrong[0] = _rawSig(linkPk, plm.requestLinkDigest(address(safe), address(usdc), AMOUNT + 1, linkSigner, FEE_BPS));
+        wrong[1] = _rawSig(linkPk, _specRequestDigest(address(plm), makeAddr("otherSafe"), address(usdc), AMOUNT, linkSigner, FEE_BPS, 0));
+        wrong[2] = _rawSig(linkPk, _specRequestDigest(makeAddr("otherModule"), address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, 0));
+        wrong[3] = _rawSig(linkPk, _specRequestDigest(address(plm), address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, 1));
+        wrong[4] = _rawSig(linkPk, inner); // no EIP-191 prefix
+        wrong[5] = _rawSig(linkPk, MessageHashUtils.toEthSignedMessageHash(digest)); // prefixed twice
+        for (uint256 i = 0; i < wrong.length; i++) {
+            vm.expectRevert(IPaymentLinkModule.InvalidLinkSignature.selector);
+            plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, wrong[i], signers, sigs);
+        }
+
+        // personal_sign over the inner hash is the same signature as a raw one over the digest.
+        vm.prank(relayer);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, _rawSig(linkPk, digest), signers, sigs);
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Requested));
     }
 
     function test_requestLink_signatureBoundToModule() public {
@@ -310,7 +370,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         // Signed for `other` (same nonce 0, same args) and replayed against `plm`.
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(other.requestLinkDigest(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS));
         vm.expectRevert(IPaymentLinkModule.InvalidSignatures.selector);
-        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, _linkSig(address(usdc), AMOUNT, linkSigner), signers, sigs);
     }
 
     function test_requestLink_tombstonesUsedSigners() public {
@@ -350,7 +410,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
     function _expectSignerUsed(address linkSigner) internal {
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS));
         vm.expectRevert(IPaymentLinkModule.LinkSignerUsed.selector);
-        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, _linkSig(address(usdc), AMOUNT, linkSigner), signers, sigs);
     }
 
     function test_requestLink_falseReturningToken_zeroDelay_revertsUnexpectedOutcome() public {
@@ -359,7 +419,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address linkSigner,) = _newLinkKey();
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(falseToken), 1 ether, linkSigner, FEE_BPS));
         vm.expectRevert(IPaymentLinkModule.UnexpectedWithdrawalOutcome.selector);
-        plm.requestLink(address(safe), address(falseToken), 1 ether, linkSigner, FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), address(falseToken), 1 ether, linkSigner, FEE_BPS, _linkSig(address(falseToken), 1 ether, linkSigner), signers, sigs);
     }
 
     function test_requestLink_feeOnTransferToken_zeroDelay_revertsUnexpectedOutcome() public {
@@ -368,7 +428,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address linkSigner,) = _newLinkKey();
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(fotToken), 1 ether, linkSigner, FEE_BPS));
         vm.expectRevert(IPaymentLinkModule.UnexpectedWithdrawalOutcome.selector);
-        plm.requestLink(address(safe), address(fotToken), 1 ether, linkSigner, FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), address(fotToken), 1 ether, linkSigner, FEE_BPS, _linkSig(address(fotToken), 1 ether, linkSigner), signers, sigs);
     }
 
     function test_requestLink_revertsForNonWithdrawableToken() public {
@@ -380,7 +440,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address linkSigner,) = _newLinkKey();
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(unlisted), 1 ether, linkSigner, FEE_BPS));
         vm.expectRevert(abi.encodeWithSelector(ICashModule.InvalidWithdrawAsset.selector, address(unlisted)));
-        plm.requestLink(address(safe), address(unlisted), 1 ether, linkSigner, FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), address(unlisted), 1 ether, linkSigner, FEE_BPS, _linkSig(address(unlisted), 1 ether, linkSigner), signers, sigs);
     }
 
     // ---- token allowlist ----
@@ -398,14 +458,14 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address linkSigner,) = _newLinkKey();
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(notAllowed), 1 ether, linkSigner, FEE_BPS));
         vm.expectRevert(IPaymentLinkModule.TokenNotAllowed.selector);
-        plm.requestLink(address(safe), address(notAllowed), 1 ether, linkSigner, FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), address(notAllowed), 1 ether, linkSigner, FEE_BPS, _linkSig(address(notAllowed), 1 ether, linkSigner), signers, sigs);
 
         // Disallowing a launch token blocks new links in it too, and the rejected attempt used nothing up.
         vm.prank(owner);
         plm.setTokenAllowed(address(usdc), false);
         (signers, sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS));
         vm.expectRevert(IPaymentLinkModule.TokenNotAllowed.selector);
-        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, _linkSig(address(usdc), AMOUNT, linkSigner), signers, sigs);
         assertEq(plm.getNonce(address(safe)), 0);
         assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.None));
     }
@@ -646,6 +706,22 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(_bal(address(usdc), externalRecipient), AMOUNT);
     }
 
+    /// @dev The minimum is checked against the fee owed at execution: a signer who expects the
+    ///      waiver is protected while a fee receiver is set, and claims in full once it is cleared.
+    function test_claim_minAmountChecksExecutionTimeFeeWaiver() public {
+        (address linkSigner, uint256 linkPk) = _fundedLink(address(usdc), AMOUNT);
+        bytes memory fullAmount = _claimSig(plm, linkPk, linkSigner, externalRecipient, AMOUNT);
+
+        vm.expectRevert(IPaymentLinkModule.PayoutBelowMinimum.selector);
+        plm.claim(linkSigner, externalRecipient, AMOUNT, fullAmount);
+
+        vm.prank(owner);
+        plm.setFee(0, address(0));
+        vm.prank(relayer);
+        plm.claim(linkSigner, externalRecipient, AMOUNT, fullAmount);
+        assertEq(_bal(address(usdc), externalRecipient), AMOUNT);
+    }
+
     function test_claim_readsLiveFeeReceiver() public {
         (address linkSigner, uint256 linkPk) = _fundedLink(address(usdc), AMOUNT);
         address newReceiver = makeAddr("newFeeReceiver");
@@ -661,7 +737,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address linkSigner, uint256 linkPk) = _fundedLink(address(usdc), AMOUNT);
         bytes memory sig = _claimSig(plm, linkPk, linkSigner, externalRecipient);
         vm.expectRevert(IPaymentLinkModule.InvalidClaimSignature.selector);
-        plm.claim(linkSigner, makeAddr("attacker"), sig);
+        plm.claim(linkSigner, makeAddr("attacker"), 0, sig);
     }
 
     function test_claim_replayWithOtherLinkReverts() public {
@@ -671,11 +747,11 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         // A's valid claim signature cannot claim B, and A's key cannot sign for B.
         bytes memory sigForA = _claimSig(plm, pkA, linkA, externalRecipient);
         vm.expectRevert(IPaymentLinkModule.InvalidClaimSignature.selector);
-        plm.claim(linkB, externalRecipient, sigForA);
+        plm.claim(linkB, externalRecipient, 0, sigForA);
 
         bytes memory aKeyOverB = _claimSig(plm, pkA, linkB, externalRecipient);
         vm.expectRevert(IPaymentLinkModule.InvalidClaimSignature.selector);
-        plm.claim(linkB, externalRecipient, aKeyOverB);
+        plm.claim(linkB, externalRecipient, 0, aKeyOverB);
     }
 
     function test_claim_replayFromOtherChainReverts() public {
@@ -689,7 +765,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(block.chainid, originalChainId);
 
         vm.expectRevert(IPaymentLinkModule.InvalidClaimSignature.selector);
-        plm.claim(linkSigner, externalRecipient, otherChainSig);
+        plm.claim(linkSigner, externalRecipient, 0, otherChainSig);
     }
 
     function test_claim_replayFromOtherContractReverts() public {
@@ -698,49 +774,71 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         bytes memory otherContractSig = _claimSig(other, linkPk, linkSigner, externalRecipient);
 
         vm.expectRevert(IPaymentLinkModule.InvalidClaimSignature.selector);
-        plm.claim(linkSigner, externalRecipient, otherContractSig);
+        plm.claim(linkSigner, externalRecipient, 0, otherContractSig);
+    }
+
+    function test_claim_minAmountIsNetOfFee_andBoundIntoSignature() public {
+        (address linkSigner, uint256 linkPk) = _fundedLink(address(usdc), AMOUNT);
+        uint256 net = AMOUNT - AMOUNT * FEE_BPS / 10_000;
+
+        // One unit above the net payout reverts and leaves the link funded.
+        bytes memory tooHigh = _claimSig(plm, linkPk, linkSigner, externalRecipient, net + 1);
+        vm.expectRevert(IPaymentLinkModule.PayoutBelowMinimum.selector);
+        plm.claim(linkSigner, externalRecipient, net + 1, tooHigh);
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Funded));
+
+        // A submitter cannot change the signed minimum.
+        bytes memory exact = _claimSig(plm, linkPk, linkSigner, externalRecipient, net);
+        vm.expectRevert(IPaymentLinkModule.InvalidClaimSignature.selector);
+        plm.claim(linkSigner, externalRecipient, 0, exact);
+
+        // Exactly the net payout passes.
+        vm.prank(relayer);
+        plm.claim(linkSigner, externalRecipient, net, exact);
+        assertEq(_bal(address(usdc), externalRecipient), net);
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Claimed));
     }
 
     function test_claim_malformedSignatureReverts() public {
         (address linkSigner,) = _fundedLink(address(usdc), AMOUNT);
         vm.expectRevert(IPaymentLinkModule.InvalidClaimSignature.selector);
-        plm.claim(linkSigner, externalRecipient, hex"1234");
+        plm.claim(linkSigner, externalRecipient, 0, hex"1234");
     }
 
     function test_claim_revertsOnZeroOrSelfRecipient() public {
         (address linkSigner, uint256 linkPk) = _fundedLink(address(usdc), AMOUNT);
         bytes memory sig = _claimSig(plm, linkPk, linkSigner, address(0));
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        plm.claim(linkSigner, address(0), sig);
+        plm.claim(linkSigner, address(0), 0, sig);
 
         sig = _claimSig(plm, linkPk, linkSigner, address(plm));
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        plm.claim(linkSigner, address(plm), sig);
+        plm.claim(linkSigner, address(plm), 0, sig);
     }
 
     function test_claim_revertsUnlessFunded() public {
         (address unused, uint256 unusedPk) = _newLinkKey();
         bytes memory sig = _claimSig(plm, unusedPk, unused, externalRecipient);
         vm.expectRevert(IPaymentLinkModule.LinkNotClaimable.selector);
-        plm.claim(unused, externalRecipient, sig);
+        plm.claim(unused, externalRecipient, 0, sig);
 
         (address requested, uint256 requestedPk) = _newLinkKey();
         _request(address(usdc), AMOUNT, requested);
         sig = _claimSig(plm, requestedPk, requested, externalRecipient);
         vm.expectRevert(IPaymentLinkModule.LinkNotClaimable.selector);
-        plm.claim(requested, externalRecipient, sig);
+        plm.claim(requested, externalRecipient, 0, sig);
     }
 
     // ---- claim vs cancel ----
 
     function test_claimThenCancel_onlyClaimSucceeds() public {
         (address linkSigner, uint256 linkPk) = _fundedLink(address(usdc), AMOUNT);
-        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner));
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner, 0));
 
         _claim(linkSigner, linkPk, externalRecipient);
 
         vm.expectRevert(IPaymentLinkModule.LinkNotCancellable.selector);
-        plm.cancel(linkSigner, signers, sigs);
+        plm.cancel(linkSigner, 0, signers, sigs);
     }
 
     function test_cancelThenClaim_onlyCancelSucceeds() public {
@@ -750,7 +848,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         _cancel(linkSigner);
 
         vm.expectRevert(IPaymentLinkModule.LinkNotClaimable.selector);
-        plm.claim(linkSigner, externalRecipient, claimSig);
+        plm.claim(linkSigner, externalRecipient, 0, claimSig);
         assertEq(_bal(address(usdc), externalRecipient), 0);
     }
 
@@ -760,18 +858,18 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         uint256 safeBalBefore = _bal(address(usdc), address(safe));
         (address linkSigner, uint256 linkPk) = _fundedLink(address(usdc), amount);
         bytes memory claimSig = _claimSig(plm, linkPk, linkSigner, externalRecipient);
-        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner));
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner, 0));
 
         if (claimFirst) {
-            plm.claim(linkSigner, externalRecipient, claimSig);
+            plm.claim(linkSigner, externalRecipient, 0, claimSig);
             vm.expectRevert(IPaymentLinkModule.LinkNotCancellable.selector);
-            plm.cancel(linkSigner, signers, sigs);
+            plm.cancel(linkSigner, 0, signers, sigs);
             assertEq(_bal(address(usdc), externalRecipient) + _bal(address(usdc), plFeeReceiver), amount);
             assertEq(_bal(address(usdc), address(safe)), safeBalBefore - amount);
         } else {
-            plm.cancel(linkSigner, signers, sigs);
+            plm.cancel(linkSigner, 0, signers, sigs);
             vm.expectRevert(IPaymentLinkModule.LinkNotClaimable.selector);
-            plm.claim(linkSigner, externalRecipient, claimSig);
+            plm.claim(linkSigner, externalRecipient, 0, claimSig);
             assertEq(_bal(address(usdc), externalRecipient), 0);
             assertEq(_bal(address(usdc), address(safe)), safeBalBefore);
         }
@@ -890,13 +988,13 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         shouldAdd[1] = true;
         _configureOwners(owners, shouldAdd, 2);
 
-        bytes32 digest = plm.cancelLinkDigest(linkSigner);
+        bytes32 digest = plm.cancelLinkDigest(linkSigner, 0);
         (address[] memory oldSigners, bytes[] memory oldSigs) = _sigs(digest, owner1, owner1Pk, owner2, owner2Pk);
         vm.expectRevert(abi.encodeWithSelector(EtherFiSafeErrors.InvalidSigner.selector, 0));
-        plm.cancel(linkSigner, oldSigners, oldSigs);
+        plm.cancel(linkSigner, 0, oldSigners, oldSigs);
 
         (address[] memory newSigners, bytes[] memory newSigs) = _sigs(digest, newOwner, newOwnerPk, owner3, owner3Pk);
-        plm.cancel(linkSigner, newSigners, newSigs);
+        plm.cancel(linkSigner, 0, newSigners, newSigs);
         assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Cancelled));
     }
 
@@ -904,13 +1002,13 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address linkA,) = _fundedLink(address(usdc), AMOUNT);
         (address linkB,) = _fundedLink(address(usdc), AMOUNT);
 
-        (address[] memory signers, bytes[] memory sigsA) = _ownerSigs(plm.cancelLinkDigest(linkA));
+        (address[] memory signers, bytes[] memory sigsA) = _ownerSigs(plm.cancelLinkDigest(linkA, 0));
         // A's cancel signature cannot cancel B.
         vm.expectRevert(IPaymentLinkModule.InvalidSignatures.selector);
-        plm.cancel(linkB, signers, sigsA);
+        plm.cancel(linkB, 0, signers, sigsA);
 
         // The failed attempt reverted, so the nonce is unchanged and A's signature still works once.
-        plm.cancel(linkA, signers, sigsA);
+        plm.cancel(linkA, 0, signers, sigsA);
         assertEq(uint8(_status(linkA)), uint8(IPaymentLinkModule.LinkStatus.Cancelled));
     }
 
@@ -918,26 +1016,26 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address linkSigner,) = _fundedLink(address(usdc), AMOUNT);
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(keccak256("not the cancel digest"));
         vm.expectRevert(IPaymentLinkModule.InvalidSignatures.selector);
-        plm.cancel(linkSigner, signers, sigs);
+        plm.cancel(linkSigner, 0, signers, sigs);
     }
 
     function test_cancel_revertsUnlessRequestedOrFunded() public {
         (address unused,) = _newLinkKey();
-        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(unused));
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(unused, 0));
         vm.expectRevert(IPaymentLinkModule.LinkNotCancellable.selector);
-        plm.cancel(unused, signers, sigs);
+        plm.cancel(unused, 0, signers, sigs);
 
         (address claimed, uint256 claimedPk) = _fundedLink(address(usdc), AMOUNT);
         _claim(claimed, claimedPk, externalRecipient);
-        (signers, sigs) = _ownerSigs(plm.cancelLinkDigest(claimed));
+        (signers, sigs) = _ownerSigs(plm.cancelLinkDigest(claimed, 0));
         vm.expectRevert(IPaymentLinkModule.LinkNotCancellable.selector);
-        plm.cancel(claimed, signers, sigs);
+        plm.cancel(claimed, 0, signers, sigs);
 
         (address cancelled,) = _fundedLink(address(usdc), AMOUNT);
         _cancel(cancelled);
-        (signers, sigs) = _ownerSigs(plm.cancelLinkDigest(cancelled));
+        (signers, sigs) = _ownerSigs(plm.cancelLinkDigest(cancelled, 0));
         vm.expectRevert(IPaymentLinkModule.LinkNotCancellable.selector);
-        plm.cancel(cancelled, signers, sigs);
+        plm.cancel(cancelled, 0, signers, sigs);
     }
 
     // ---- CashModule callback ----
@@ -956,9 +1054,9 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(plm.getPendingLink(address(safe)), address(0));
         assertEq(_pendingTokensLength(), 0);
 
-        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner));
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner, 0));
         vm.expectRevert(IPaymentLinkModule.LinkNotCancellable.selector);
-        plm.cancel(linkSigner, signers, sigs);
+        plm.cancel(linkSigner, 0, signers, sigs);
         vm.expectRevert(IPaymentLinkModule.NoPendingLink.selector);
         plm.fundLink(address(safe));
 
@@ -1121,30 +1219,30 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
     ///      shortfall a misprocessed hold first covers the deficit and the sender is only
     ///      partially made whole. Pins that behaviour; the full fix belongs in CashModule.
     function test_requesterDeWhitelisted_inShortfall_misprocessedFundsCoverDeficitFirst() public {
-        (address funded, uint256 fundedPk) = _fundedLink(address(rebaseToken), 100 ether);
+        (address funded, uint256 fundedPk) = _fundedLink(address(shortfallToken), 100 ether);
         (address requested,) = _newLinkKey();
-        _request(address(rebaseToken), 100 ether, requested);
+        _request(address(shortfallToken), 100 ether, requested);
 
-        rebaseToken.rebase(4, 5); // module: 80 held against 100 owed
+        shortfallToken.shrinkBalances(4, 5); // module: 80 held against 100 owed
         _setCanRequestWithdraw(false);
         _warpPastDelay();
         cashModule.processWithdrawal(address(safe)); // the Requested link's 100 lands unrecorded
         plm.reconcile(address(safe));
         assertEq(uint8(_status(requested)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled));
-        assertEq(_bal(address(rebaseToken), address(plm)), 180 ether);
-        assertEq(plm.getLiabilities(address(rebaseToken)), 100 ether);
+        assertEq(_bal(address(shortfallToken), address(plm)), 180 ether);
+        assertEq(plm.getLiabilities(address(shortfallToken)), 100 ether);
 
         vm.startPrank(owner);
         vm.expectRevert(IPaymentLinkModule.InsufficientSurplus.selector);
-        plm.rescueSurplus(address(rebaseToken), address(safe), 80 ether + 1);
-        plm.rescueSurplus(address(rebaseToken), address(safe), 80 ether);
+        plm.rescueSurplus(address(shortfallToken), address(safe), 80 ether + 1);
+        plm.rescueSurplus(address(shortfallToken), address(safe), 80 ether);
         vm.stopPrank();
 
         // The funded link now exits in full: 20 of the misprocessed 100 covered its deficit.
         address recipient = _deploySecondSafe();
         _claim(funded, fundedPk, recipient);
-        assertEq(_bal(address(rebaseToken), recipient), 100 ether);
-        assertEq(_bal(address(rebaseToken), address(plm)), 0);
+        assertEq(_bal(address(shortfallToken), recipient), 100 ether);
+        assertEq(_bal(address(shortfallToken), address(plm)), 0);
     }
 
     /// @dev Removing the module from the DataProvider whitelist makes CashModule refuse the
@@ -1160,9 +1258,9 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         vm.prank(owner);
         dataProvider.configureModules(mods, no);
 
-        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner));
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner, 0));
         vm.expectRevert(ICashModule.ModuleNotWhitelistedOnDataProvider.selector);
-        plm.cancel(linkSigner, signers, sigs);
+        plm.cancel(linkSigner, 0, signers, sigs);
         assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Requested));
         assertEq(plm.getPendingLink(address(safe)), linkSigner);
 
@@ -1200,11 +1298,11 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
     }
 
     function test_rescueSurplus_refusedInShortfall() public {
-        _fundedLink(address(rebaseToken), 100 ether);
-        rebaseToken.rebase(9, 10);
+        _fundedLink(address(shortfallToken), 100 ether);
+        shortfallToken.shrinkBalances(9, 10);
         vm.prank(owner);
         vm.expectRevert(IPaymentLinkModule.InsufficientSurplus.selector);
-        plm.rescueSurplus(address(rebaseToken), externalRecipient, 1);
+        plm.rescueSurplus(address(shortfallToken), externalRecipient, 1);
     }
 
     function test_rescueSurplus_rejectsTransferThatEatsIntoLiabilities() public {
@@ -1241,7 +1339,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address next,) = _newLinkKey();
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(usdc), AMOUNT, next, FEE_BPS));
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        plm.requestLink(address(safe), address(usdc), AMOUNT, next, FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, next, FEE_BPS, _linkSig(address(usdc), AMOUNT, next), signers, sigs);
 
         _warpPastDelay();
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
@@ -1249,11 +1347,11 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
 
         bytes memory claimSig = _claimSig(plm, fundedPk, funded, externalRecipient);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        plm.claim(funded, externalRecipient, claimSig);
+        plm.claim(funded, externalRecipient, 0, claimSig);
 
         vm.prank(unpauser);
         plm.unpause();
-        plm.claim(funded, externalRecipient, claimSig);
+        plm.claim(funded, externalRecipient, 0, claimSig);
         plm.fundLink(address(safe));
         assertEq(uint8(_status(pendingLink)), uint8(IPaymentLinkModule.LinkStatus.Funded));
     }
@@ -1273,11 +1371,11 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address linkSigner, uint256 linkPk) = _fundedLink(address(reentrantToken), 10 ether);
         address attacker = makeAddr("attacker");
         bytes memory attackerSig = _claimSig(plm, linkPk, linkSigner, attacker);
-        reentrantToken.arm(address(plm), abi.encodeCall(PaymentLinkModule.claim, (linkSigner, attacker, attackerSig)), true);
+        reentrantToken.arm(address(plm), abi.encodeCall(PaymentLinkModule.claim, (linkSigner, attacker, 0, attackerSig)), true);
 
         bytes memory sig = _claimSig(plm, linkPk, linkSigner, externalRecipient);
         vm.expectRevert(ReentrancyGuardTransientUpgradeable.ReentrancyGuardReentrantCall.selector);
-        plm.claim(linkSigner, externalRecipient, sig);
+        plm.claim(linkSigner, externalRecipient, 0, sig);
 
         assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Funded));
         assertEq(plm.getLiabilities(address(reentrantToken)), 10 ether);
@@ -1287,7 +1385,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address linkSigner, uint256 linkPk) = _fundedLink(address(reentrantToken), 10 ether);
         address attacker = makeAddr("attacker");
         bytes memory attackerSig = _claimSig(plm, linkPk, linkSigner, attacker);
-        reentrantToken.arm(address(plm), abi.encodeCall(PaymentLinkModule.claim, (linkSigner, attacker, attackerSig)), false);
+        reentrantToken.arm(address(plm), abi.encodeCall(PaymentLinkModule.claim, (linkSigner, attacker, 0, attackerSig)), false);
 
         _claim(linkSigner, linkPk, externalRecipient);
 
@@ -1306,17 +1404,17 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         address attacker = makeAddr("attacker");
         bytes memory attackerSig = _claimSig(plm, linkPk, linkSigner, attacker);
         // The refund to the safe triggers the hook, which tries to claim the same link.
-        reentrantToken.arm(address(plm), abi.encodeCall(PaymentLinkModule.claim, (linkSigner, attacker, attackerSig)), true);
+        reentrantToken.arm(address(plm), abi.encodeCall(PaymentLinkModule.claim, (linkSigner, attacker, 0, attackerSig)), true);
 
-        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner));
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner, 0));
         vm.expectRevert(ReentrancyGuardTransientUpgradeable.ReentrancyGuardReentrantCall.selector);
-        plm.cancel(linkSigner, signers, sigs);
+        plm.cancel(linkSigner, 0, signers, sigs);
         assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Funded));
 
         // Swallowed variant: the cancel completes and the attacker gets nothing.
-        reentrantToken.arm(address(plm), abi.encodeCall(PaymentLinkModule.claim, (linkSigner, attacker, attackerSig)), false);
+        reentrantToken.arm(address(plm), abi.encodeCall(PaymentLinkModule.claim, (linkSigner, attacker, 0, attackerSig)), false);
         uint256 safeBalBefore = _bal(address(reentrantToken), address(safe));
-        plm.cancel(linkSigner, signers, sigs);
+        plm.cancel(linkSigner, 0, signers, sigs);
         assertFalse(reentrantToken.lastReentrySucceeded());
         assertEq(_bal(address(reentrantToken), attacker), 0);
         assertEq(_bal(address(reentrantToken), address(safe)), safeBalBefore + 10 ether);
@@ -1336,35 +1434,35 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Funded));
     }
 
-    // ---- shortfall (negative rebase) ----
+    // ---- shortfall (a loss outside the module) ----
 
-    function test_negativeRebase_proRataPayoutsAndOtherTokensUnaffected() public {
-        (address r1, uint256 r1Pk) = _fundedLink(address(rebaseToken), 100 ether);
-        (address r2,) = _fundedLink(address(rebaseToken), 300 ether);
+    function test_shortfall_proRataPayoutsAndOtherTokensUnaffected() public {
+        (address r1, uint256 r1Pk) = _fundedLink(address(shortfallToken), 100 ether);
+        (address r2,) = _fundedLink(address(shortfallToken), 300 ether);
         (address u, uint256 uPk) = _fundedLink(address(usdc), AMOUNT);
         (address p,) = _fundedLink(address(plainToken), 50 ether);
 
         // -10% for every holder, including the module.
-        rebaseToken.rebase(9, 10);
-        assertEq(_bal(address(rebaseToken), address(plm)), 360 ether);
-        assertEq(plm.getLiabilities(address(rebaseToken)), 400 ether);
+        shortfallToken.shrinkBalances(9, 10);
+        assertEq(_bal(address(shortfallToken), address(plm)), 360 ether);
+        assertEq(plm.getLiabilities(address(shortfallToken)), 400 ether);
 
         // r1: 100 * 360 / 400 = 90 gross, fee on the gross.
         uint256 r1Gross = Math.mulDiv(100 ether, 360 ether, 400 ether);
         uint256 r1Fee = r1Gross * FEE_BPS / 10_000;
         vm.expectEmit(true, true, true, true, address(plm));
-        emit IPaymentLinkModule.LinkClaimed(address(safe), r1, externalRecipient, address(rebaseToken), r1Gross - r1Fee, r1Fee);
+        emit IPaymentLinkModule.LinkClaimed(address(safe), r1, externalRecipient, address(shortfallToken), r1Gross - r1Fee, r1Fee);
         _claim(r1, r1Pk, externalRecipient);
         assertEq(r1Gross, 90 ether);
 
         // r2: 300 * 270 / 300 = 270, refunded to the safe with no fee.
-        uint256 safeBefore = _bal(address(rebaseToken), address(safe));
+        uint256 safeBefore = _bal(address(shortfallToken), address(safe));
         vm.expectEmit(true, true, true, true, address(plm));
-        emit IPaymentLinkModule.LinkCancelled(address(safe), r2, address(rebaseToken), 270 ether);
+        emit IPaymentLinkModule.LinkCancelled(address(safe), r2, address(shortfallToken), 270 ether);
         _cancel(r2);
-        assertEq(_bal(address(rebaseToken), address(safe)), safeBefore + 270 ether);
-        assertEq(plm.getLiabilities(address(rebaseToken)), 0);
-        assertEq(_bal(address(rebaseToken), address(plm)), 0);
+        assertEq(_bal(address(shortfallToken), address(safe)), safeBefore + 270 ether);
+        assertEq(plm.getLiabilities(address(shortfallToken)), 0);
+        assertEq(_bal(address(shortfallToken), address(plm)), 0);
 
         // Other tokens pay in full.
         _claim(u, uPk, externalRecipient);
@@ -1374,12 +1472,93 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(_bal(address(plainToken), address(safe)), safePlainBefore + 50 ether);
     }
 
-    function test_escrowShortfall_blocksNewRequestsAndFunding_cancelStillWorks() public {
-        _fundedLink(address(rebaseToken), 100 ether);
-        (address requested,) = _newLinkKey();
-        _request(address(rebaseToken), 10 ether, requested);
+    function test_shortfall_claimBelowMinimumWaitsForBacking() public {
+        (address linkSigner, uint256 linkPk) = _fundedLink(address(shortfallToken), 100 ether);
+        address recipientSafe = _deploySecondSafe(); // fee-free
+        bytes memory sig = _claimSig(plm, linkPk, linkSigner, recipientSafe, 100 ether);
 
-        rebaseToken.rebase(1, 2);
+        shortfallToken.shrinkBalances(9, 10); // 90 held against 100 owed
+        vm.expectRevert(IPaymentLinkModule.PayoutBelowMinimum.selector);
+        plm.claim(linkSigner, recipientSafe, 100 ether, sig);
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Funded));
+        assertEq(plm.getLiabilities(address(shortfallToken)), 100 ether);
+
+        // Restoring the backing lets the same signature claim in full.
+        shortfallToken.mint(address(plm), 10 ether);
+        vm.prank(relayer);
+        plm.claim(linkSigner, recipientSafe, 100 ether, sig);
+        assertEq(_bal(address(shortfallToken), recipientSafe), 100 ether);
+        assertEq(_bal(address(shortfallToken), address(plm)), 0);
+        assertEq(plm.getLiabilities(address(shortfallToken)), 0);
+    }
+
+    function test_shortfall_positiveMinimumRejectsZeroPayout() public {
+        (address claimLink, uint256 claimPk) = _fundedLink(address(shortfallToken), 100 ether);
+        (address cancelLink,) = _fundedLink(address(shortfallToken), 100 ether);
+        shortfallToken.shrinkBalances(0, 1); // nothing held against 200 owed
+
+        bytes memory minOne = _claimSig(plm, claimPk, claimLink, externalRecipient, 1);
+        vm.expectRevert(IPaymentLinkModule.PayoutBelowMinimum.selector);
+        plm.claim(claimLink, externalRecipient, 1, minOne);
+
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(cancelLink, 1));
+        vm.expectRevert(IPaymentLinkModule.PayoutBelowMinimum.selector);
+        plm.cancel(cancelLink, 1, signers, sigs);
+
+        // A zero minimum still lets the signer close the link with nothing paid.
+        _claim(claimLink, claimPk, externalRecipient);
+        assertEq(uint8(_status(claimLink)), uint8(IPaymentLinkModule.LinkStatus.Claimed));
+        assertEq(_bal(address(shortfallToken), externalRecipient), 0);
+        assertEq(plm.getLiabilities(address(shortfallToken)), 100 ether);
+    }
+
+    function test_shortfall_fundedCancelBelowMinRefundReverts() public {
+        (address linkSigner,) = _fundedLink(address(shortfallToken), 100 ether);
+        shortfallToken.shrinkBalances(9, 10); // 90 held against 100 owed
+
+        uint256 nonceBefore = plm.getNonce(address(safe));
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner, 100 ether));
+        vm.expectRevert(IPaymentLinkModule.PayoutBelowMinimum.selector);
+        plm.cancel(linkSigner, 100 ether, signers, sigs);
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Funded));
+        assertEq(plm.getNonce(address(safe)), nonceBefore, "a refused cancel uses no nonce");
+
+        // Owners who accept the pro-rata refund sign that as the minimum.
+        (signers, sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner, 90 ether));
+        uint256 safeBefore = _bal(address(shortfallToken), address(safe));
+        vm.prank(relayer);
+        plm.cancel(linkSigner, 90 ether, signers, sigs);
+        assertEq(_bal(address(shortfallToken), address(safe)) - safeBefore, 90 ether);
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Cancelled));
+    }
+
+    function test_cancel_requestedCountsFullAmount_minRefundBoundIntoSignature() public {
+        (address linkSigner,) = _newLinkKey();
+        _request(address(usdc), AMOUNT, linkSigner);
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Requested));
+
+        // The tokens never left the safe, so the refund is the full amount and nothing above it.
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner, AMOUNT + 1));
+        vm.expectRevert(IPaymentLinkModule.PayoutBelowMinimum.selector);
+        plm.cancel(linkSigner, AMOUNT + 1, signers, sigs);
+
+        // A submitter cannot change the signed minimum.
+        (signers, sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner, AMOUNT));
+        vm.expectRevert(IPaymentLinkModule.InvalidSignatures.selector);
+        plm.cancel(linkSigner, 0, signers, sigs);
+
+        vm.prank(relayer);
+        plm.cancel(linkSigner, AMOUNT, signers, sigs);
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Cancelled));
+        assertEq(_pendingTokensLength(), 0);
+    }
+
+    function test_escrowShortfall_blocksNewRequestsAndFunding_cancelStillWorks() public {
+        _fundedLink(address(shortfallToken), 100 ether);
+        (address requested,) = _newLinkKey();
+        _request(address(shortfallToken), 10 ether, requested);
+
+        shortfallToken.shrinkBalances(1, 2);
 
         _warpPastDelay();
         vm.expectRevert(IPaymentLinkModule.EscrowShortfall.selector);
@@ -1389,9 +1568,9 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(uint8(_status(requested)), uint8(IPaymentLinkModule.LinkStatus.Cancelled));
 
         (address next,) = _newLinkKey();
-        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(rebaseToken), 1 ether, next, FEE_BPS));
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(shortfallToken), 1 ether, next, FEE_BPS));
         vm.expectRevert(IPaymentLinkModule.EscrowShortfall.selector);
-        plm.requestLink(address(safe), address(rebaseToken), 1 ether, next, FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), address(shortfallToken), 1 ether, next, FEE_BPS, _linkSig(address(shortfallToken), 1 ether, next), signers, sigs);
 
         // Other tokens are unaffected.
         _request(address(usdc), AMOUNT, next);
@@ -1399,7 +1578,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
     }
 
     /// forge-config: default.fuzz.runs = 64
-    function testFuzz_negativeRebase_proRataNeverOverpays(uint96 a1, uint96 a2, uint96 a3, uint16 keepBps, bool firstClaims) public {
+    function testFuzz_shortfall_proRataNeverOverpays(uint96 a1, uint96 a2, uint96 a3, uint16 keepBps, bool firstClaims) public {
         uint256[3] memory amounts = [bound(a1, 1, 100_000 ether), bound(a2, 1, 100_000 ether), bound(a3, 1, 100_000 ether)];
         keepBps = uint16(bound(keepBps, 0, 10_000));
 
@@ -1407,32 +1586,32 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         uint256[3] memory pks;
         uint256 total;
         for (uint256 i = 0; i < 3; i++) {
-            (signers_[i], pks[i]) = _fundedLink(address(rebaseToken), amounts[i]);
+            (signers_[i], pks[i]) = _fundedLink(address(shortfallToken), amounts[i]);
             total += amounts[i];
         }
-        rebaseToken.rebase(keepBps, 10_000);
-        uint256 escrowAfterRebase = _bal(address(rebaseToken), address(plm));
+        shortfallToken.shrinkBalances(keepBps, 10_000);
+        uint256 escrowAfterLoss = _bal(address(shortfallToken), address(plm));
 
         uint256 paidOut;
         for (uint256 i = 0; i < 3; i++) {
-            uint256 balance = _bal(address(rebaseToken), address(plm));
-            uint256 liabilities = plm.getLiabilities(address(rebaseToken));
+            uint256 balance = _bal(address(shortfallToken), address(plm));
+            uint256 liabilities = plm.getLiabilities(address(shortfallToken));
             uint256 expected = balance >= liabilities ? amounts[i] : Math.mulDiv(amounts[i], balance, liabilities);
-            uint256 recipientBefore = _bal(address(rebaseToken), address(safe));
+            uint256 recipientBefore = _bal(address(shortfallToken), address(safe));
             if (i == 0 && firstClaims) {
                 address recipient = _deploySecondSafe();
                 _claim(signers_[i], pks[i], recipient);
-                assertEq(_bal(address(rebaseToken), recipient), expected, "claim to safe pays the pro-rata gross, no fee");
+                assertEq(_bal(address(shortfallToken), recipient), expected, "claim to safe pays the pro-rata gross, no fee");
             } else {
                 _cancel(signers_[i]);
-                assertEq(_bal(address(rebaseToken), address(safe)) - recipientBefore, expected, "cancel refunds the pro-rata gross");
+                assertEq(_bal(address(shortfallToken), address(safe)) - recipientBefore, expected, "cancel refunds the pro-rata gross");
             }
             assertLe(expected, amounts[i]);
             paidOut += expected;
         }
-        assertEq(plm.getLiabilities(address(rebaseToken)), 0);
-        assertLe(paidOut, escrowAfterRebase, "never pays out more than the escrow holds");
-        assertLe(escrowAfterRebase, total);
+        assertEq(plm.getLiabilities(address(shortfallToken)), 0);
+        assertLe(paidOut, escrowAfterLoss, "never pays out more than the escrow holds");
+        assertLe(escrowAfterLoss, total);
     }
 
     // ---- sender-taxed tokens (exits must not skim other links) ----
@@ -1454,15 +1633,15 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
             // External recipient (fee + payout), ether.fi safe (payout only) and cancel all revert.
             bytes memory sig = _claimSig(plm, pks[i], links[i], externalRecipient);
             vm.expectRevert(IPaymentLinkModule.BalanceDeltaMismatch.selector);
-            plm.claim(links[i], externalRecipient, sig);
+            plm.claim(links[i], externalRecipient, 0, sig);
 
             sig = _claimSig(plm, pks[i], links[i], recipientSafe);
             vm.expectRevert(IPaymentLinkModule.BalanceDeltaMismatch.selector);
-            plm.claim(links[i], recipientSafe, sig);
+            plm.claim(links[i], recipientSafe, 0, sig);
 
-            (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(links[i]));
+            (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(links[i], 0));
             vm.expectRevert(IPaymentLinkModule.BalanceDeltaMismatch.selector);
-            plm.cancel(links[i], signers, sigs);
+            plm.cancel(links[i], 0, signers, sigs);
 
             assertEq(uint8(_status(links[i])), uint8(IPaymentLinkModule.LinkStatus.Funded));
         }
@@ -1483,7 +1662,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
 
         bytes memory sig = _claimSig(plm, linkPk, link, externalRecipient);
         vm.expectRevert(IPaymentLinkModule.BalanceDeltaMismatch.selector);
-        plm.claim(link, externalRecipient, sig);
+        plm.claim(link, externalRecipient, 0, sig);
 
         assertEq(_bal(address(taxedToken), plFeeReceiver), 0, "fee transfer rolled back");
         assertEq(_bal(address(taxedToken), externalRecipient), 0);
@@ -1563,8 +1742,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         plm.setFee(feeBps, plFeeReceiver);
 
         (address linkSigner, uint256 linkPk) = _newLinkKey();
-        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(usdc), amount, linkSigner, feeBps));
-        plm.requestLink(address(safe), address(usdc), amount, linkSigner, feeBps, signers, sigs);
+        _request(address(usdc), amount, linkSigner, feeBps);
         _fund();
 
         address recipient = toSafe ? _deploySecondSafe() : externalRecipient;
@@ -1633,7 +1811,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address next,) = _newLinkKey();
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(usdc), AMOUNT, next, FEE_BPS));
         vm.expectRevert(IPaymentLinkModule.TokenNotAllowed.selector);
-        plm.requestLink(address(safe), address(usdc), AMOUNT, next, FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, next, FEE_BPS, _linkSig(address(usdc), AMOUNT, next), signers, sigs);
         _claim(toClaim, toClaimPk, externalRecipient);
         _cancel(toCancel);
         _cancel(requested);

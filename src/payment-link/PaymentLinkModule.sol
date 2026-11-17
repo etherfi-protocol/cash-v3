@@ -19,11 +19,12 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  * @author ether.fi
  * @notice Escrow for payment links on OP. A safe's owners sign ONE request that places a
  *         CashModule withdrawal hold with this module as recipient, keyed by a throwaway
- *         `linkSigner` address whose private key travels in the link URL. Once the withdrawal
+ *         `linkSigner` address whose private key travels in the link URL. The link key signs the
+ *         same request, so no safe can take a `linkSigner` without its key. Once the withdrawal
  *         delay matures, the permissionless `fundLink(safe)` pulls the funds in. Whoever holds the
  *         link key can then `claim` to any recipient (fee-free to an EtherFiSafe, `feeBps` to
  *         anything else); the safe's current owners can call `cancel` at any time, including
- *         while paused.
+ *         while paused. Claims and cancels carry a signed minimum payout.
  * @dev The module is whitelisted on the DataProvider and allowed to request withdrawals on the
  *      CashModule, but is never enabled on safes, so it has no `execTransactionFromModule`
  *      authority and cannot use `IEtherFiSafe.useNonce()`. Owner signatures therefore use this
@@ -32,9 +33,14 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *
  *      Accounting is per token: `liabilities[token]` is the sum of funded, unclaimed and
  *      uncancelled link amounts. Payouts are computed from a snapshot of the module balance and
- *      liabilities taken before any state change. When a token's balance falls below its
- *      liabilities (for example after a negative rebase), every exit in that token is paid
- *      pro rata and new links in it are refused (`EscrowShortfall`); other tokens are untouched.
+ *      liabilities taken before any state change. The module's own transfers move exact amounts,
+ *      so its balance can only fall below its liabilities through a change outside the module.
+ *      Rebasing and other balance-changing tokens are not supported (see the allowlist rule
+ *      below); the shortfall path only bounds the damage if such a change happens anyway. In a
+ *      shortfall every exit in that token is paid pro rata, new links and funding in it are
+ *      refused (`EscrowShortfall`), and other tokens are untouched. An exit that would pay less
+ *      than the minimum its signer agreed to reverts (`PayoutBelowMinimum`) and the link stays
+ *      as it was.
  *
  *      New links are limited to tokens governance allows here (`setTokenAllowed`), which must also
  *      be on CashModule's withdraw-asset list. Allow only tokens that move exact amounts: the
@@ -49,8 +55,9 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *      successful exact-debit transfer. A token that taxes the SENDER passes funding (the safe
  *      pays the tax) and then fails every exit whose transfers are actually taxed: such a link
  *      can be neither claimed nor cancelled while that holds. Transfers the tax rounds to zero,
- *      or that the token exempts, still succeed, and a shortfall exit whose gross payout is zero
- *      finalizes without transferring. Only offer tokens that move exact amounts.
+ *      or that the token exempts, still succeed, and a shortfall exit whose payout is zero
+ *      finalizes without transferring when its signed minimum is zero. Only offer tokens that
+ *      move exact amounts.
  *
  *      Failed transfers (token blocklists, pauses, taxes): the whole call reverts, so the link
  *      stays `Funded` and liabilities, balances and the owners' cancel nonce are unchanged.
@@ -112,7 +119,7 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
     bytes32 public constant CANCEL_LINK_SIG = keccak256("cancelLink");
 
     /// @notice EIP-712 type hash of the claim the link key signs.
-    bytes32 public constant CLAIM_TYPEHASH = keccak256("Claim(address linkSigner,address recipient)");
+    bytes32 public constant CLAIM_TYPEHASH = keccak256("Claim(address linkSigner,address recipient,uint256 minAmount)");
     /// @dev EIP-712 domain type hash.
     bytes32 private constant EIP712_DOMAIN_TYPEHASH = keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
     /// @dev `keccak256("EtherFi PaymentLinkModule")`, the EIP-712 domain name.
@@ -157,13 +164,18 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      *         `token` from `safe` with this module as recipient. With a zero CashModule withdrawal
      *         delay CashModule transfers inline and the link is `Funded` in this call; otherwise it
      *         stays `Requested` until `fundLink`.
-     * @dev The owners sign `requestLinkDigest(safe, token, amount, linkSigner, feeBps)` at the
-     *      module's current nonce for `safe`.
+     * @dev The owners and the link key both sign `requestLinkDigest(safe, token, amount,
+     *      linkSigner, feeBps)` at the module's current nonce for `safe`. The link key's signature
+     *      proves the request comes from whoever holds that key, so another safe cannot take a
+     *      `linkSigner` it has only seen; the digest binds the chain, module, safe, nonce and
+     *      every request parameter, so the signature cannot be reused for a different request.
      * @param safe The EtherFiSafe sending the funds.
      * @param token The ERC-20 to escrow (allowed here and on CashModule's withdraw-asset list).
      * @param amount The amount to escrow.
      * @param linkSigner The address of the link's private key; the link ID.
      * @param feeBps The fee the owners agreed to; must equal the current fee.
+     * @param linkSignature The link key's signature over the request digest (65-byte r || s || v,
+     *        made over the prefixed digest itself, i.e. `personal_sign` over the inner hash).
      * @param signers Safe owners that signed the request digest.
      * @param signatures Signatures corresponding to `signers`.
      * @custom:throws OnlyEtherFiSafe If `safe` is not an EtherFiSafe.
@@ -175,15 +187,17 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      * @custom:throws PendingLinkExists If the safe already has a `Requested` link.
      * @custom:throws PendingWithdrawalExists If CashModule holds a pending withdrawal for the safe.
      * @custom:throws InvalidSignatures If the signatures don't meet the safe's threshold.
+     * @custom:throws InvalidLinkSignature If `linkSignature` was not made by `linkSigner` over the request digest.
      * @custom:throws UnexpectedWithdrawalOutcome If CashModule neither holds a matching pending
      *                request nor transferred exactly `amount` inline.
      */
-    function requestLink(address safe, address token, uint256 amount, address linkSigner, uint16 feeBps, address[] calldata signers, bytes[] calldata signatures) external whenNotPaused nonReentrant onlyEtherFiSafe(safe) {
+    function requestLink(address safe, address token, uint256 amount, address linkSigner, uint16 feeBps, bytes calldata linkSignature, address[] calldata signers, bytes[] calldata signatures) external whenNotPaused nonReentrant onlyEtherFiSafe(safe) {
         _validateRequest(safe, token, amount, linkSigner, feeBps);
 
         uint256 nonce = _useNonce(safe);
         bytes32 digest = _requestLinkDigest(safe, token, amount, linkSigner, feeBps, nonce);
         _checkOwnerSignatures(safe, digest, signers, signatures);
+        _checkLinkSignature(digest, linkSigner, linkSignature);
 
         _storeRequest(safe, token, amount, linkSigner, feeBps);
         _placeWithdrawal(safe, token, amount, linkSigner);
@@ -223,33 +237,38 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
 
     /**
      * @notice Pays a funded link to `recipient`. Authorized by the link key's EIP-712 signature
-     *         over `Claim(linkSigner, recipient)`, so a relayed signature cannot be redirected.
+     *         over `Claim(linkSigner, recipient, minAmount)`, so a relayed signature cannot be
+     *         redirected or executed below the payout its signer agreed to.
      * @dev Permissionless submission. The fee is the link's snapshotted rate, rounded down, and
-     *      is waived when `recipient` is an EtherFiSafe or no fee receiver is configured. In a
-     *      shortfall the gross payout is pro rata (see `_grossPayout`).
+     *      is waived when `recipient` is an EtherFiSafe or no fee receiver is configured; both
+     *      are read at execution. In a shortfall the gross payout is pro rata (see `_grossPayout`).
+     *      `minAmount` bounds the NET amount `recipient` receives (gross minus fee), checked after
+     *      the fee is computed and before any state change. A zero `minAmount` accepts any payout,
+     *      including a zero payout in a severe shortfall.
      * @param linkSigner The link ID.
      * @param recipient The address to pay.
-     * @param signature The link key's signature over `claimDigest(linkSigner, recipient)`.
+     * @param minAmount The least `recipient` must receive after the fee.
+     * @param signature The link key's signature over `claimDigest(linkSigner, recipient, minAmount)`.
      * @custom:throws LinkNotClaimable If the link is not `Funded`.
      * @custom:throws InvalidInput If `recipient` is zero or this module.
      * @custom:throws InvalidClaimSignature If the signature was not made by `linkSigner`.
+     * @custom:throws PayoutBelowMinimum If `recipient` would receive less than `minAmount`.
      * @custom:throws BalanceDeltaMismatch If a payout moved the module's balance by more or less
      *                than the amount sent (for example a token that taxes the sender).
      */
-    function claim(address linkSigner, address recipient, bytes calldata signature) external whenNotPaused nonReentrant {
+    function claim(address linkSigner, address recipient, uint256 minAmount, bytes calldata signature) external whenNotPaused nonReentrant {
         PaymentLinkModuleStorage storage $ = _getPaymentLinkModuleStorage();
         Link storage link = $.links[linkSigner];
         if (link.status != LinkStatus.Funded) revert LinkNotClaimable();
         if (recipient == address(0) || recipient == address(this)) revert InvalidInput();
-
-        (address recovered, ECDSA.RecoverError err,) = ECDSA.tryRecover(_claimDigest(linkSigner, recipient), signature);
-        if (err != ECDSA.RecoverError.NoError || recovered != linkSigner) revert InvalidClaimSignature();
+        _checkClaimSignature(linkSigner, recipient, minAmount, signature);
 
         address token = link.token;
         uint256 amount = link.amount;
         uint256 gross = _grossPayout($, token, amount);
         address feeReceiver = $.feeReceiver;
         uint256 fee = (feeReceiver == address(0) || etherFiDataProvider.isEtherFiSafe(recipient)) ? 0 : gross.mulDiv(link.feeBps, HUNDRED_PERCENT_IN_BPS);
+        if (gross - fee < minAmount) revert PayoutBelowMinimum();
 
         link.status = LinkStatus.Claimed;
         $.liabilities[token] -= amount;
@@ -269,26 +288,33 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      *      on failed transfers). A `Requested` link moves no tokens; its state is cleared BEFORE
      *      `cancelWithdrawalByModule`, so CashModule's `cancelBridgeByCashModule` callback finds
      *      nothing to do.
+     *
+     *      `minRefund` bounds what the safe gets back. A funded link refunds its gross payout
+     *      (pro rata in a shortfall); a requested link's tokens never left the safe, so its
+     *      refund is the full link amount and any `minRefund` up to that amount passes. The
+     *      owners sign the minimum without knowing which state the link will be in when the
+     *      cancel executes.
      * @param linkSigner The link ID.
-     * @param signers Safe owners that signed `cancelLinkDigest(linkSigner)`.
+     * @param minRefund The least the safe must get back.
+     * @param signers Safe owners that signed `cancelLinkDigest(linkSigner, minRefund)`.
      * @param signatures Signatures corresponding to `signers`.
      * @custom:throws LinkNotCancellable If the link is neither `Requested` nor `Funded`.
      * @custom:throws InvalidSignatures If the signatures don't meet the safe's threshold.
+     * @custom:throws PayoutBelowMinimum If the refund would be less than `minRefund`.
      * @custom:throws BalanceDeltaMismatch If a funded link's refund moved the module's balance by
      *                more or less than the amount refunded.
      */
-    function cancel(address linkSigner, address[] calldata signers, bytes[] calldata signatures) external nonReentrant {
+    function cancel(address linkSigner, uint256 minRefund, address[] calldata signers, bytes[] calldata signatures) external nonReentrant {
         PaymentLinkModuleStorage storage $ = _getPaymentLinkModuleStorage();
         Link storage link = $.links[linkSigner];
         LinkStatus status = link.status;
         if (status != LinkStatus.Requested && status != LinkStatus.Funded) revert LinkNotCancellable();
 
         address safe = link.safe;
-        uint256 nonce = _useNonce(safe);
-        _checkOwnerSignatures(safe, _cancelLinkDigest(safe, linkSigner, nonce), signers, signatures);
+        _checkOwnerSignatures(safe, _cancelLinkDigest(safe, linkSigner, minRefund, _useNonce(safe)), signers, signatures);
 
-        if (status == LinkStatus.Requested) _cancelRequested($, link, safe, linkSigner);
-        else _cancelFunded($, link, safe, linkSigner);
+        if (status == LinkStatus.Requested) _cancelRequested($, link, safe, linkSigner, minRefund);
+        else _cancelFunded($, link, safe, linkSigner, minRefund);
     }
 
     /**
@@ -364,8 +390,8 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
 
     /**
      * @notice Transfers `amount` of `token` that the module holds ABOVE its liabilities to `to`.
-     * @dev Surplus is owed to no link: donations, positive rebases, or a CashModule withdrawal
-     *      processed into the module without `fundLink` (see the governance rule above). The
+     * @dev Surplus is owed to no link: donations, or a CashModule withdrawal processed into the
+     *      module without `fundLink` (see the governance rule above). The
      *      transfer must lower the balance by exactly `amount <= balance - liabilities`, so no
      *      outstanding link can ever be paid less because of a rescue. It is NOT a guaranteed
      *      recovery: in a token that is in shortfall, misprocessed funds first cover the deficit.
@@ -442,17 +468,19 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      * @notice Returns the EIP-712 digest the link key signs to claim to `recipient`.
      * @param linkSigner The link ID.
      * @param recipient The recipient bound into the signature.
+     * @param minAmount The least `recipient` must receive after the fee.
      * @return The EIP-712 typed-data digest.
      */
-    function claimDigest(address linkSigner, address recipient) external view returns (bytes32) {
-        return _claimDigest(linkSigner, recipient);
+    function claimDigest(address linkSigner, address recipient, uint256 minAmount) external view returns (bytes32) {
+        return _claimDigest(linkSigner, recipient, minAmount);
     }
 
     /**
-     * @notice Returns the EIP-191 digest the safe's owners sign for `requestLink`, at the
-     *         module's current nonce for `safe`.
-     * @dev This is the prefixed hash `checkSignatures` verifies, i.e. what `personal_sign` over
-     *      the 32-byte inner hash produces.
+     * @notice Returns the EIP-191 digest the safe's owners and the link key sign for
+     *         `requestLink`, at the module's current nonce for `safe`.
+     * @dev This is the prefixed hash `checkSignatures` and the link-key check verify, i.e. what
+     *      `personal_sign` over the 32-byte inner hash produces. Sign it as is, without adding
+     *      the prefix again.
      * @param safe The EtherFiSafe sending the funds.
      * @param token The ERC-20 to escrow.
      * @param amount The amount to escrow.
@@ -470,11 +498,12 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      * @dev Same prefixed form as `requestLinkDigest`. Computed even for an unused `linkSigner`
      *      (with a zero safe), which `cancel` would reject.
      * @param linkSigner The link ID.
+     * @param minRefund The least the safe must get back.
      * @return The digest to sign.
      */
-    function cancelLinkDigest(address linkSigner) external view returns (bytes32) {
+    function cancelLinkDigest(address linkSigner, uint256 minRefund) external view returns (bytes32) {
         address safe = _getPaymentLinkModuleStorage().links[linkSigner].safe;
-        return _cancelLinkDigest(safe, linkSigner, getNonce(safe));
+        return _cancelLinkDigest(safe, linkSigner, minRefund, getNonce(safe));
     }
 
     /**
@@ -538,6 +567,19 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
         if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignatures();
     }
 
+    /// @dev Reverts unless `signature` is `linkSigner`'s raw ECDSA signature over the (already
+    ///      prefixed) request `digest`.
+    function _checkLinkSignature(bytes32 digest, address linkSigner, bytes calldata signature) internal pure {
+        (address recovered, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signature);
+        if (err != ECDSA.RecoverError.NoError || recovered != linkSigner) revert InvalidLinkSignature();
+    }
+
+    /// @dev Reverts unless `signature` is `linkSigner`'s signature over `claimDigest(linkSigner, recipient, minAmount)`.
+    function _checkClaimSignature(address linkSigner, address recipient, uint256 minAmount, bytes calldata signature) internal view {
+        (address recovered, ECDSA.RecoverError err,) = ECDSA.tryRecover(_claimDigest(linkSigner, recipient, minAmount), signature);
+        if (err != ECDSA.RecoverError.NoError || recovered != linkSigner) revert InvalidClaimSignature();
+    }
+
     /// @dev `Requested` → `Funded`: the escrow is now a liability.
     function _markFunded(PaymentLinkModuleStorage storage $, address safe, address linkSigner, address token, uint256 amount) internal {
         $.links[linkSigner].status = LinkStatus.Funded;
@@ -554,8 +596,10 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
     }
 
     /// @dev `Requested` → `Cancelled`. Clears state first, then releases CashModule's hold if it is
-    ///      still the link's own request; its callback then no-ops.
-    function _cancelRequested(PaymentLinkModuleStorage storage $, Link storage link, address safe, address linkSigner) internal {
+    ///      still the link's own request; its callback then no-ops. The tokens never left the
+    ///      safe, so the refund counted against `minRefund` is the full link amount.
+    function _cancelRequested(PaymentLinkModuleStorage storage $, Link storage link, address safe, address linkSigner, uint256 minRefund) internal {
+        if (link.amount < minRefund) revert PayoutBelowMinimum();
         link.status = LinkStatus.Cancelled;
         delete $.pendingLink[safe];
 
@@ -567,10 +611,11 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
 
     /// @dev `Funded` → `Cancelled`. The refund is computed from the pre-mutation snapshot, carries
     ///      no fee and only ever goes to the link's own safe.
-    function _cancelFunded(PaymentLinkModuleStorage storage $, Link storage link, address safe, address linkSigner) internal {
+    function _cancelFunded(PaymentLinkModuleStorage storage $, Link storage link, address safe, address linkSigner, uint256 minRefund) internal {
         address token = link.token;
         uint256 amount = link.amount;
         uint256 gross = _grossPayout($, token, amount);
+        if (gross < minRefund) revert PayoutBelowMinimum();
 
         link.status = LinkStatus.Cancelled;
         $.liabilities[token] -= amount;
@@ -593,8 +638,10 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      * @dev Gross payout for exiting a funded link of `amount`, from a snapshot of the module's
      *      balance and liabilities in `token` taken before any state change. In a shortfall
      *      (`balance < liabilities`) every exit is paid `amount * balance / liabilities`, rounded
-     *      down, which keeps the remaining ratio unchanged (floor rounding slightly favours later
-     *      exits). Other tokens are never touched.
+     *      down. An exit therefore never lowers the remaining balance-to-liabilities ratio: before
+     *      rounding it is unchanged, and rounding down can only raise it, by a lot on a tiny
+     *      balance (2 held against 3 owed pays a 1-unit exit nothing and leaves 2 against 2).
+     *      Other tokens are never touched.
      */
     function _grossPayout(PaymentLinkModuleStorage storage $, address token, uint256 amount) internal view returns (uint256) {
         uint256 balance = IERC20(token).balanceOf(address(this));
@@ -609,19 +656,20 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
         return pending.recipient == address(this) && pending.tokens.length == 1 && pending.tokens[0] == token && pending.amounts[0] == amount;
     }
 
-    /// @dev EIP-191 owner digest for `requestLink`, bound to chain, module, nonce and safe.
+    /// @dev EIP-191 digest for `requestLink`, signed by the owners and the link key, bound to chain,
+    ///      module, nonce, safe and every request parameter.
     function _requestLinkDigest(address safe, address token, uint256 amount, address linkSigner, uint16 feeBps, uint256 nonce) internal view returns (bytes32) {
         return keccak256(abi.encodePacked(REQUEST_LINK_SIG, block.chainid, address(this), nonce, safe, abi.encode(token, amount, linkSigner, feeBps))).toEthSignedMessageHash();
     }
 
-    /// @dev EIP-191 owner digest for `cancel`, bound to chain, module, nonce, safe and link.
-    function _cancelLinkDigest(address safe, address linkSigner, uint256 nonce) internal view returns (bytes32) {
-        return keccak256(abi.encodePacked(CANCEL_LINK_SIG, block.chainid, address(this), nonce, safe, linkSigner)).toEthSignedMessageHash();
+    /// @dev EIP-191 owner digest for `cancel`, bound to chain, module, nonce, safe, link and minimum refund.
+    function _cancelLinkDigest(address safe, address linkSigner, uint256 minRefund, uint256 nonce) internal view returns (bytes32) {
+        return keccak256(abi.encodePacked(CANCEL_LINK_SIG, block.chainid, address(this), nonce, safe, linkSigner, minRefund)).toEthSignedMessageHash();
     }
 
-    /// @dev EIP-712 digest of `Claim(linkSigner, recipient)` under this module's domain.
-    function _claimDigest(address linkSigner, address recipient) internal view returns (bytes32) {
-        return MessageHashUtils.toTypedDataHash(DOMAIN_SEPARATOR(), keccak256(abi.encode(CLAIM_TYPEHASH, linkSigner, recipient)));
+    /// @dev EIP-712 digest of `Claim(linkSigner, recipient, minAmount)` under this module's domain.
+    function _claimDigest(address linkSigner, address recipient, uint256 minAmount) internal view returns (bytes32) {
+        return MessageHashUtils.toTypedDataHash(DOMAIN_SEPARATOR(), keccak256(abi.encode(CLAIM_TYPEHASH, linkSigner, recipient, minAmount)));
     }
 
     /// @dev Shared by `initialize` and `setFee`. Zero bps disables the fee (the receiver may then

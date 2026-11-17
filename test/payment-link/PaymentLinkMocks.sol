@@ -67,11 +67,14 @@ contract FalseReturnToken is ERC20 {
     }
 }
 
-/// @dev Minimal ERC-20 whose balances can be scaled down for every holder at once (negative rebase).
-///      Balances are stored directly, so transfers move exact amounts; `rebase` rounds each holder down.
-contract NegativeRebaseToken {
-    string public constant name = "Negative Rebase";
-    string public constant symbol = "NRB";
+/// @dev Exact-transfer ERC-20 fixture for escrow shortfalls: `shrinkBalances` scales every holder's
+///      balance down at once (rounding each down), standing in for any loss outside the module.
+///      Balances are stored directly, so transfers move exact amounts. It is NOT a model of a
+///      share-based rebasing token, whose transfers can be off by a wei and which the module does
+///      not support.
+contract ShortfallToken {
+    string public constant name = "Shortfall";
+    string public constant symbol = "SHORT";
     uint8 public constant decimals = 18;
 
     mapping(address => uint256) public balanceOf;
@@ -91,8 +94,8 @@ contract NegativeRebaseToken {
     }
 
     /// @dev Scales every holder's balance by `numerator / denominator` (rounded down).
-    function rebase(uint256 numerator, uint256 denominator) external {
-        require(numerator <= denominator, "negative rebase only");
+    function shrinkBalances(uint256 numerator, uint256 denominator) external {
+        require(numerator <= denominator, "shrink only");
         uint256 supply;
         for (uint256 i = 0; i < holders.length; i++) {
             uint256 scaled = balanceOf[holders[i]] * numerator / denominator;

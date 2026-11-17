@@ -24,12 +24,13 @@ contract VectorDataProvider {
 /**
  * @title PaymentLinkDigestVectorsTest
  * @notice Pins the three digests the off-chain builders must reproduce, as a JSON fixture at
- *         test/payment-link/fixtures/digest-vectors.json: `requestLinkDigest` and
- *         `cancelLinkDigest` (EIP-191 owner digests over the module's own per-safe nonce) and
- *         `claimDigest` (EIP-712, domain "EtherFi PaymentLinkModule" / "1"). The vectors use
- *         chain id 10 and the predicted dev and prod proxy addresses, and include a claim
- *         signature by a TEST-ONLY key (private keys 1, 2, 3) so the claim relay and the web
- *         signer can be checked end to end.
+ *         test/payment-link/fixtures/digest-vectors.json: `requestLinkDigest` (EIP-191, signed by
+ *         the owners and the link key) and `cancelLinkDigest` (EIP-191, signed by the owners),
+ *         both over the module's own per-safe nonce, and `claimDigest` (EIP-712, domain
+ *         "EtherFi PaymentLinkModule" / "1"). The vectors use chain id 10 and the predicted dev
+ *         and prod proxy addresses, and include the link key's request and claim signatures by
+ *         TEST-ONLY keys (private keys 1, 2, 3) so off-chain signers and verifiers can be checked
+ *         end to end.
  * @dev No fork needed. Regenerate the fixture (only when the digest format intentionally
  *      changes) with:
  *        PAYMENT_LINK_WRITE_VECTORS=true forge test --match-path test/payment-link/PaymentLinkDigestVectors.t.sol
@@ -61,6 +62,8 @@ contract PaymentLinkDigestVectorsTest is Test {
         uint16 feeBps;
         uint256 nonce;
         address recipient;
+        uint256 minAmount;
+        uint256 minRefund;
     }
 
     struct Computed {
@@ -68,6 +71,7 @@ contract PaymentLinkDigestVectorsTest is Test {
         bytes32 domainSeparator;
         bytes32 requestLinkMessageHash;
         bytes32 requestLinkDigest;
+        bytes requestLinkSignature;
         bytes32 cancelLinkMessageHash;
         bytes32 cancelLinkDigest;
         bytes32 claimStructHash;
@@ -85,7 +89,9 @@ contract PaymentLinkDigestVectorsTest is Test {
             linkSignerTestPrivateKey: 1,
             feeBps: 30,
             nonce: 0,
-            recipient: 0x2222222222222222222222222222222222222222
+            recipient: 0x2222222222222222222222222222222222222222,
+            minAmount: 24_925_000, // 25 USDC less the 30 bps fee
+            minRefund: 25_000_000
         });
         v[1] = Vector({
             name: "prod-weeth-1.5-fee0-nonce7",
@@ -96,7 +102,9 @@ contract PaymentLinkDigestVectorsTest is Test {
             linkSignerTestPrivateKey: 2,
             feeBps: 0,
             nonce: 7,
-            recipient: 0x4444444444444444444444444444444444444444
+            recipient: 0x4444444444444444444444444444444444444444,
+            minAmount: 1.5 ether,
+            minRefund: 0
         });
         v[2] = Vector({
             name: "prod-max-fee100-nonce123456",
@@ -107,7 +115,9 @@ contract PaymentLinkDigestVectorsTest is Test {
             linkSignerTestPrivateKey: 3,
             feeBps: 100,
             nonce: 123_456,
-            recipient: 0x7777777777777777777777777777777777777777
+            recipient: 0x7777777777777777777777777777777777777777,
+            minAmount: type(uint256).max,
+            minRefund: type(uint128).max
         });
     }
 
@@ -143,10 +153,13 @@ contract PaymentLinkDigestVectorsTest is Test {
             assertEq(json.readUint(string.concat(p, ".inputs.feeBps")), v[i].feeBps);
             assertEq(json.readUint(string.concat(p, ".inputs.nonce")), v[i].nonce);
             assertEq(json.readAddress(string.concat(p, ".inputs.recipient")), v[i].recipient);
+            assertEq(vm.parseUint(json.readString(string.concat(p, ".inputs.minAmount"))), v[i].minAmount);
+            assertEq(vm.parseUint(json.readString(string.concat(p, ".inputs.minRefund"))), v[i].minRefund);
 
             assertEq(json.readBytes32(string.concat(p, ".expected.domainSeparator")), c.domainSeparator, "domainSeparator");
             assertEq(json.readBytes32(string.concat(p, ".expected.requestLinkMessageHash")), c.requestLinkMessageHash, "requestLinkMessageHash");
             assertEq(json.readBytes32(string.concat(p, ".expected.requestLinkDigest")), c.requestLinkDigest, "requestLinkDigest");
+            assertEq(json.readBytes(string.concat(p, ".expected.requestLinkSignature")), c.requestLinkSignature, "requestLinkSignature");
             assertEq(json.readBytes32(string.concat(p, ".expected.cancelLinkMessageHash")), c.cancelLinkMessageHash, "cancelLinkMessageHash");
             assertEq(json.readBytes32(string.concat(p, ".expected.cancelLinkDigest")), c.cancelLinkDigest, "cancelLinkDigest");
             assertEq(json.readBytes32(string.concat(p, ".expected.claimStructHash")), c.claimStructHash, "claimStructHash");
@@ -173,14 +186,18 @@ contract PaymentLinkDigestVectorsTest is Test {
         c.requestLinkMessageHash = keccak256(abi.encodePacked(keccak256("requestLink"), CHAIN_ID, v.module, v.nonce, v.safe, abi.encode(v.token, v.amount, c.linkSigner, v.feeBps)));
         c.requestLinkDigest = c.requestLinkMessageHash.toEthSignedMessageHash();
         assertEq(module.requestLinkDigest(v.safe, v.token, v.amount, c.linkSigner, v.feeBps), c.requestLinkDigest);
+        // The link key signs the prefixed digest as is (no second prefix).
+        (uint8 rv, bytes32 rr, bytes32 rs) = vm.sign(v.linkSignerTestPrivateKey, c.requestLinkDigest);
+        c.requestLinkSignature = abi.encodePacked(rr, rs, rv);
+        assertEq(ECDSA.recover(c.requestLinkDigest, c.requestLinkSignature), c.linkSigner);
 
-        c.cancelLinkMessageHash = keccak256(abi.encodePacked(keccak256("cancelLink"), CHAIN_ID, v.module, v.nonce, v.safe, c.linkSigner));
+        c.cancelLinkMessageHash = keccak256(abi.encodePacked(keccak256("cancelLink"), CHAIN_ID, v.module, v.nonce, v.safe, c.linkSigner, v.minRefund));
         c.cancelLinkDigest = c.cancelLinkMessageHash.toEthSignedMessageHash();
-        assertEq(module.cancelLinkDigest(c.linkSigner), c.cancelLinkDigest);
+        assertEq(module.cancelLinkDigest(c.linkSigner, v.minRefund), c.cancelLinkDigest);
 
-        c.claimStructHash = keccak256(abi.encode(keccak256("Claim(address linkSigner,address recipient)"), c.linkSigner, v.recipient));
+        c.claimStructHash = keccak256(abi.encode(keccak256("Claim(address linkSigner,address recipient,uint256 minAmount)"), c.linkSigner, v.recipient, v.minAmount));
         c.claimDigest = keccak256(abi.encodePacked("\x19\x01", c.domainSeparator, c.claimStructHash));
-        assertEq(module.claimDigest(c.linkSigner, v.recipient), c.claimDigest);
+        assertEq(module.claimDigest(c.linkSigner, v.recipient, v.minAmount), c.claimDigest);
 
         (uint8 sv, bytes32 r, bytes32 s) = vm.sign(v.linkSignerTestPrivateKey, c.claimDigest);
         c.claimSignature = abi.encodePacked(r, s, sv);
@@ -190,7 +207,7 @@ contract PaymentLinkDigestVectorsTest is Test {
     function _writeFixture(Vector[3] memory v) internal {
         string memory out = string.concat(
             "{\n",
-            '  "description": "PaymentLinkModule digest test vectors for off-chain signers. Private keys here are TEST-ONLY values 1, 2 and 3. requestLinkDigest and cancelLinkDigest are the EIP-191 hashes checkSignatures verifies, i.e. personal_sign over the 32-byte *MessageHash. claimDigest is the EIP-712 hash the link key signs with a raw (no prefix) ECDSA signature, encoded r || s || v.",\n',
+            '  "description": "PaymentLinkModule digest test vectors for off-chain signers. Private keys here are TEST-ONLY values 1, 2 and 3. requestLinkDigest and cancelLinkDigest are the EIP-191 hashes the module verifies, i.e. personal_sign over the 32-byte *MessageHash. The owners sign both; the link key also signs requestLinkDigest (requestLinkSignature: a raw ECDSA signature over requestLinkDigest itself, equivalently personal_sign over requestLinkMessageHash, never a second prefix over the digest). claimDigest is the EIP-712 hash of Claim(linkSigner, recipient, minAmount) the link key signs with a raw (no prefix) ECDSA signature. minAmount is the least the recipient must receive after the fee; minRefund is the least a cancel must return to the safe. Signatures are encoded r || s || v.",\n',
             '  "chainId": ',
             vm.toString(CHAIN_ID),
             ",\n",
@@ -203,7 +220,7 @@ contract PaymentLinkDigestVectorsTest is Test {
             vm.toString(keccak256("cancelLink")),
             '",\n',
             '    "CLAIM_TYPEHASH": "',
-            vm.toString(keccak256("Claim(address linkSigner,address recipient)")),
+            vm.toString(keccak256("Claim(address linkSigner,address recipient,uint256 minAmount)")),
             '"\n',
             "  },\n",
             '  "vectors": [\n'
@@ -226,7 +243,9 @@ contract PaymentLinkDigestVectorsTest is Test {
             '        "linkSignerTestPrivateKey": "', vm.toString(bytes32(v.linkSignerTestPrivateKey)), '",\n',
             '        "feeBps": ', vm.toString(v.feeBps), ",\n",
             '        "nonce": ', vm.toString(v.nonce), ",\n",
-            '        "recipient": "', vm.toString(v.recipient), '"\n',
+            '        "recipient": "', vm.toString(v.recipient), '",\n',
+            '        "minAmount": "', vm.toString(v.minAmount), '",\n',
+            '        "minRefund": "', vm.toString(v.minRefund), '"\n',
             "      },\n"
         );
         string memory expected = string.concat(
@@ -234,6 +253,7 @@ contract PaymentLinkDigestVectorsTest is Test {
             '        "domainSeparator": "', vm.toString(c.domainSeparator), '",\n',
             '        "requestLinkMessageHash": "', vm.toString(c.requestLinkMessageHash), '",\n',
             '        "requestLinkDigest": "', vm.toString(c.requestLinkDigest), '",\n',
+            '        "requestLinkSignature": "', vm.toString(c.requestLinkSignature), '",\n',
             '        "cancelLinkMessageHash": "', vm.toString(c.cancelLinkMessageHash), '",\n',
             '        "cancelLinkDigest": "', vm.toString(c.cancelLinkDigest), '",\n',
             '        "claimStructHash": "', vm.toString(c.claimStructHash), '",\n',

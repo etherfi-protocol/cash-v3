@@ -8,7 +8,7 @@ import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { IPaymentLinkModule } from "../../src/interfaces/IPaymentLinkModule.sol";
 import { PaymentLinkModule } from "../../src/payment-link/PaymentLinkModule.sol";
 import { CashModuleTestSetup } from "../safe/modules/cash/CashModuleTestSetup.t.sol";
-import { FalseReturnToken, FeeOnTransferToken, NegativeRebaseToken, PlainToken, ReentrantToken, SenderTaxToken } from "./PaymentLinkMocks.sol";
+import { FalseReturnToken, FeeOnTransferToken, PlainToken, ReentrantToken, SenderTaxToken, ShortfallToken } from "./PaymentLinkMocks.sol";
 
 /**
  * @title PaymentLinkModuleTestSetup
@@ -26,7 +26,7 @@ contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
     PlainToken internal plainToken;
     FeeOnTransferToken internal fotToken;
     FalseReturnToken internal falseToken;
-    NegativeRebaseToken internal rebaseToken;
+    ShortfallToken internal shortfallToken;
     ReentrantToken internal reentrantToken;
     SenderTaxToken internal taxedToken;
 
@@ -38,6 +38,11 @@ contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
     uint64 internal constant WITHDRAWAL_DELAY = 1 hours;
 
     uint256 internal linkCounter;
+    /// @dev Private key of each link key made by `_newLinkKey`, so request helpers can sign with it.
+    mapping(address linkSigner => uint256 pk) internal linkKeyOf;
+
+    // keccak256(abi.encode(uint256(keccak256("etherfi.storage.ModuleBaseStorage")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 internal constant MODULE_BASE_SLOT = 0x9425b2e03e09da4c20ff7a465da264f7a02bf7079e1dbb47fce0436e1d206d00;
 
     function setUp() public virtual override {
         super.setUp();
@@ -47,7 +52,7 @@ contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
         plainToken = new PlainToken("Plain", "PLAIN");
         fotToken = new FeeOnTransferToken();
         falseToken = new FalseReturnToken();
-        rebaseToken = new NegativeRebaseToken();
+        shortfallToken = new ShortfallToken();
         reentrantToken = new ReentrantToken();
         taxedToken = new SenderTaxToken();
 
@@ -60,7 +65,7 @@ contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
         assets[0] = address(plainToken);
         assets[1] = address(fotToken);
         assets[2] = address(falseToken);
-        assets[3] = address(rebaseToken);
+        assets[3] = address(shortfallToken);
         assets[4] = address(reentrantToken);
         assets[5] = address(taxedToken);
         bool[] memory yesAll = new bool[](6);
@@ -85,7 +90,7 @@ contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
         plainToken.mint(address(safe), 1_000_000 ether);
         fotToken.mint(address(safe), 1_000_000 ether);
         falseToken.mint(address(safe), 1_000_000 ether);
-        rebaseToken.mint(address(safe), 1_000_000 ether);
+        shortfallToken.mint(address(safe), 1_000_000 ether);
         reentrantToken.mint(address(safe), 1_000_000 ether);
         taxedToken.mint(address(safe), 1_000_000 ether);
     }
@@ -110,6 +115,24 @@ contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
     function _newLinkKey() internal returns (address signer, uint256 pk) {
         linkCounter++;
         (signer, pk) = makeAddrAndKey(string.concat("link-", vm.toString(linkCounter)));
+        linkKeyOf[signer] = pk;
+    }
+
+    /// @dev `_linkSig` for the default safe and fee.
+    function _linkSig(address token, uint256 amount, address linkSigner) internal view returns (bytes memory) {
+        return _linkSig(address(safe), token, amount, linkSigner, FEE_BPS);
+    }
+
+    /// @dev The link key's signature over the request digest at `plm`'s current nonce for `safe_`.
+    ///      Built from the independent digest encoding and a storage read (no calls), so it can sit inside a
+    ///      `requestLink` call after `vm.prank` / `vm.expectRevert`. An unknown signer gets a
+    ///      well-formed signature from an unrelated key.
+    function _linkSig(address safe_, address token, uint256 amount, address linkSigner, uint16 feeBps) internal view returns (bytes memory) {
+        uint256 nonce = uint256(vm.load(address(plm), keccak256(abi.encode(safe_, MODULE_BASE_SLOT))));
+        bytes32 digest = _specRequestDigest(address(plm), safe_, token, amount, linkSigner, feeBps, nonce);
+        uint256 pk = linkKeyOf[linkSigner];
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk == 0 ? uint256(keccak256("unrelated link key")) : pk, digest);
+        return abi.encodePacked(r, s, v);
     }
 
     function _ownerSigs(bytes32 digest) internal view returns (address[] memory signers, bytes[] memory sigs) {
@@ -127,8 +150,19 @@ contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
         sigs[1] = abi.encodePacked(r2, s2, v2);
     }
 
+    /// @dev A raw r || s || v signature over `digest`.
+    function _rawSig(uint256 pk, bytes32 digest) internal pure returns (bytes memory) {
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    /// @dev A claim signature with a zero minimum (accepts any payout).
     function _claimSig(PaymentLinkModule module, uint256 linkPk, address linkSigner, address recipient) internal view returns (bytes memory) {
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(linkPk, module.claimDigest(linkSigner, recipient));
+        return _claimSig(module, linkPk, linkSigner, recipient, 0);
+    }
+
+    function _claimSig(PaymentLinkModule module, uint256 linkPk, address linkSigner, address recipient, uint256 minAmount) internal view returns (bytes memory) {
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(linkPk, module.claimDigest(linkSigner, recipient, minAmount));
         return abi.encodePacked(r, s, v);
     }
 
@@ -138,16 +172,20 @@ contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
     }
 
     /// @dev The cancel digest rebuilt independently from its encoding.
-    function _specCancelDigest(address module, address safe_, address linkSigner, uint256 nonce) internal view returns (bytes32) {
-        return keccak256(abi.encodePacked(keccak256("cancelLink"), block.chainid, module, nonce, safe_, linkSigner)).toEthSignedMessageHash();
+    function _specCancelDigest(address module, address safe_, address linkSigner, uint256 minRefund, uint256 nonce) internal view returns (bytes32) {
+        return keccak256(abi.encodePacked(keccak256("cancelLink"), block.chainid, module, nonce, safe_, linkSigner, minRefund)).toEthSignedMessageHash();
     }
 
     // ---- lifecycle helpers ----
 
     function _request(address token, uint256 amount, address linkSigner) internal {
-        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), token, amount, linkSigner, FEE_BPS));
+        _request(token, amount, linkSigner, FEE_BPS);
+    }
+
+    function _request(address token, uint256 amount, address linkSigner, uint16 feeBps) internal {
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), token, amount, linkSigner, feeBps));
         vm.prank(relayer);
-        plm.requestLink(address(safe), token, amount, linkSigner, FEE_BPS, signers, sigs);
+        plm.requestLink(address(safe), token, amount, linkSigner, feeBps, _linkSig(address(safe), token, amount, linkSigner, feeBps), signers, sigs);
     }
 
     function _warpPastDelay() internal {
@@ -171,13 +209,13 @@ contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
     function _claim(address linkSigner, uint256 linkPk, address recipient) internal {
         bytes memory sig = _claimSig(plm, linkPk, linkSigner, recipient);
         vm.prank(relayer);
-        plm.claim(linkSigner, recipient, sig);
+        plm.claim(linkSigner, recipient, 0, sig);
     }
 
     function _cancel(address linkSigner) internal {
-        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner));
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner, 0));
         vm.prank(relayer);
-        plm.cancel(linkSigner, signers, sigs);
+        plm.cancel(linkSigner, 0, signers, sigs);
     }
 
     function _status(address linkSigner) internal view returns (IPaymentLinkModule.LinkStatus) {

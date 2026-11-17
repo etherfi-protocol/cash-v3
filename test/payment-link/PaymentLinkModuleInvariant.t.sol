@@ -93,8 +93,10 @@ contract PaymentLinkHandler is Test {
         uint256 pk = 0xA11CE + linkSigners.length;
         address linkSigner = vm.addr(pk);
         (uint16 feeBps,) = plm.getFee();
-        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(token), amount, linkSigner, feeBps));
-        plm.requestLink(address(safe), address(token), amount, linkSigner, feeBps, signers, sigs);
+        bytes32 digest = plm.requestLinkDigest(address(safe), address(token), amount, linkSigner, feeBps);
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(digest);
+        (uint8 lv, bytes32 lr, bytes32 ls) = vm.sign(pk, digest);
+        plm.requestLink(address(safe), address(token), amount, linkSigner, feeBps, abi.encodePacked(lr, ls, lv), signers, sigs);
 
         linkSigners.push(linkSigner);
         linkPk[linkSigner] = pk;
@@ -120,8 +122,12 @@ contract PaymentLinkHandler is Test {
         if (link.status != IPaymentLinkModule.LinkStatus.Funded) return;
 
         address recipient = toSafe ? recipientSafe : externalRecipient;
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(linkPk[linkSigner], plm.claimDigest(linkSigner, recipient));
-        plm.claim(linkSigner, recipient, abi.encodePacked(r, s, v));
+        // The signer asks for exactly the net payout: no shortfall with plain tokens, so gross == amount.
+        (, address feeReceiver) = plm.getFee();
+        uint256 fee = (toSafe || feeReceiver == address(0)) ? 0 : link.amount * link.feeBps / 10_000;
+        uint256 minAmount = link.amount - fee;
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(linkPk[linkSigner], plm.claimDigest(linkSigner, recipient, minAmount));
+        plm.claim(linkSigner, recipient, minAmount, abi.encodePacked(r, s, v));
 
         ghostExited[link.token] += link.amount; // no shortfall with plain tokens: gross == amount
         _observe(linkSigner);
@@ -135,8 +141,9 @@ contract PaymentLinkHandler is Test {
         IPaymentLinkModule.Link memory link = plm.getLink(linkSigner);
         if (link.status != IPaymentLinkModule.LinkStatus.Funded && link.status != IPaymentLinkModule.LinkStatus.Requested) return;
 
-        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner));
-        plm.cancel(linkSigner, signers, sigs);
+        // The owners ask for the whole amount back: no shortfall with plain tokens.
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner, link.amount));
+        plm.cancel(linkSigner, link.amount, signers, sigs);
 
         if (link.status == IPaymentLinkModule.LinkStatus.Funded) ghostExited[link.token] += link.amount;
         _observe(linkSigner);
@@ -257,7 +264,7 @@ contract PaymentLinkHandler is Test {
 
 /**
  * @title PaymentLinkModuleInvariantTest
- * @notice For every non-rebasing token: module balance >= outstanding liabilities, and in fact
+ * @notice For the plain, exact-transfer tokens the handler uses: module balance >= outstanding liabilities, and in fact
  *         balance == liabilities + donations exactly, liabilities == the sum of `Funded` link
  *         amounts, and at most one link per safe is `Requested` (the one in `pendingLink`).
  * @dev Run with: TEST_CHAIN=10 TEST_RPC=<optimism rpc> forge test --match-path "test/payment-link/PaymentLinkModuleInvariant.t.sol"
