@@ -203,6 +203,11 @@ contract PaymentLinkScriptsTest is Test {
     bytes32 internal constant REAL_DEPLOY_TX = 0x4c0685a2f0eca4c8da73e2de9fac18691be90cd7a1bf543aaa7fd1b19a3b8bfe;
     bytes32 internal constant REAL_BLOCK_HASH = 0xb9728515776b3827d7efa7c94e25c8dc253ad759057889ad5a488cac6dc509cb;
     uint256 internal constant REAL_BLOCK_NUMBER = 155_269_969;
+    /// @dev The last Optimism block before anything was deployed at the pinned dev addresses
+    ///      (DEV_IMPL and DEV_PROXY both have code from block 159_052_547). The dev deploy tests fork
+    ///      here so they deploy THIS build fresh, instead of meeting whatever build is already live
+    ///      at those addresses.
+    uint256 internal constant BEFORE_DEV_DEPLOY_BLOCK = 159_052_546;
     bytes32 internal constant EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
     bytes32 internal constant UPGRADEABLE_PROXY_STORAGE_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
     bytes32 internal constant INITIALIZABLE_STORAGE_SLOT = 0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00;
@@ -221,8 +226,15 @@ contract PaymentLinkScriptsTest is Test {
     RoleRegistry internal devRoleRegistry;
 
     function setUp() public {
+        _fork(0);
+    }
+
+    /// @dev Forks Optimism at `blockNumber` (the latest block when zero) and registers the test
+    ///      deployer on the EtherFiDeployer there.
+    function _fork(uint256 blockNumber) internal {
         string memory rpc = vm.envOr("TEST_RPC", string("https://mainnet.optimism.io"));
-        vm.createSelectFork(rpc);
+        if (blockNumber == 0) vm.createSelectFork(rpc);
+        else vm.createSelectFork(rpc, blockNumber);
         require(block.chainid == 10, "PaymentLinkScriptsTest needs an Optimism RPC");
 
         (deployerAddr, deployerPk) = makeAddrAndKey("paymentLinkTestDeployer");
@@ -294,6 +306,9 @@ contract PaymentLinkScriptsTest is Test {
     }
 
     function test_dev_deployWiresDevStackOnly_andIsIdempotent() public {
+        _fork(BEFORE_DEV_DEPLOY_BLOCK);
+        assertEq(DEV_IMPL.code.length, 0, "fork must predate the dev deployment");
+        assertEq(DEV_PROXY.code.length, 0, "fork must predate the dev deployment");
         // The dev broadcaster holds every role on the dev RoleRegistry; mirror that for the test key.
         vm.startPrank(devRoleRegistry.owner());
         devRoleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), deployerAddr);
@@ -423,6 +438,7 @@ contract PaymentLinkScriptsTest is Test {
     /// @dev An impl built against another stack must fail the prod check by its
     ///      immutables, whatever the embedded-address code comparison would conclude.
     function test_builtCode_rejectsImplBoundToAnotherStack() public {
+        _fork(BEFORE_DEV_DEPLOY_BLOCK);
         vm.startPrank(devRoleRegistry.owner());
         devRoleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), deployerAddr);
         vm.stopPrank();
@@ -433,6 +449,26 @@ contract PaymentLinkScriptsTest is Test {
 
         vm.expectRevert(bytes("PaymentLinkModule impl: etherFiDataProvider immutable is not this stack's"));
         checker.check("mainnet", DEV_IMPL, DEV_PROXY);
+    }
+
+    /// @dev A dev re-run reuses the code at the pinned addresses, so it must refuse an implementation
+    ///      that is not this build (for example one deployed from an earlier version of the module).
+    function test_dev_deployRefusesExistingImplFromAnotherBuild() public {
+        _fork(BEFORE_DEV_DEPLOY_BLOCK);
+        vm.startPrank(devRoleRegistry.owner());
+        devRoleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), deployerAddr);
+        vm.stopPrank();
+        new DeployHarness("dev", deployerPk).run();
+
+        // Change one byte of the trailing compiler-version metadata: the code still runs the same,
+        // but it is no longer byte-for-byte this build.
+        bytes memory code = DEV_IMPL.code;
+        code[code.length - 3] = bytes1(uint8(code[code.length - 3]) ^ 0x01);
+        vm.etch(DEV_IMPL, code);
+
+        DeployHarness rerun = new DeployHarness("dev", deployerPk);
+        vm.expectRevert(bytes("PaymentLinkModuleImpl: bytecode differs from the local build with every __self rebound to the impl"));
+        rerun.run();
     }
 
     /// @dev Allowing a launch token CashModule cannot withdraw would make every request in it
