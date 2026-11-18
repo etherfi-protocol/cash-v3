@@ -190,8 +190,8 @@ contract PaymentLinkScriptsTest is Test {
     EtherFiDeployer internal constant DEPLOYER = EtherFiDeployer(0xFCD957b5913d607BF2222280093421B1e2Af6f30);
     address internal constant PROD_PROXY = 0x7402a988651bAF0558642647e0D7366D939d35c4;
     address internal constant PROD_IMPL = 0x4d3B98947f10c36FE495110186fF854aB0F5593f;
-    address internal constant DEV_PROXY = 0x1bfCca1f03252D6734dCaB45F37AE3f81f6E0781;
-    address internal constant DEV_IMPL = 0x0393014ce03Fe8F0EfeF0817D7c439474ff748dD;
+    address internal constant DEV_PROXY = 0x3753EB90B48028e64f4F042E08358b00E9B11822;
+    address internal constant DEV_IMPL = 0x7ead558E8e8918590414d2B8E4A02E18716d45d8;
     address internal constant PROD_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
     address internal constant USDC = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
     address internal constant EURC = 0xDCB612005417Dc906fF72c87DF732e5a90D49e11;
@@ -203,10 +203,10 @@ contract PaymentLinkScriptsTest is Test {
     bytes32 internal constant REAL_DEPLOY_TX = 0x4c0685a2f0eca4c8da73e2de9fac18691be90cd7a1bf543aaa7fd1b19a3b8bfe;
     bytes32 internal constant REAL_BLOCK_HASH = 0xb9728515776b3827d7efa7c94e25c8dc253ad759057889ad5a488cac6dc509cb;
     uint256 internal constant REAL_BLOCK_NUMBER = 155_269_969;
-    /// @dev The last Optimism block before anything was deployed at the pinned dev addresses
-    ///      (DEV_IMPL and DEV_PROXY both have code from block 159_052_547). The dev deploy tests fork
-    ///      here so they deploy THIS build fresh, instead of meeting whatever build is already live
-    ///      at those addresses.
+    /// @dev An Optimism block from before any dev PaymentLinkModule existed: the first dev
+    ///      deployment, at the earlier dev salts, landed in block 159_052_547. The dev deploy tests
+    ///      fork here so they deploy THIS build fresh, whatever build is live at the pinned dev
+    ///      addresses.
     uint256 internal constant BEFORE_DEV_DEPLOY_BLOCK = 159_052_546;
     bytes32 internal constant EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
     bytes32 internal constant UPGRADEABLE_PROXY_STORAGE_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
@@ -258,10 +258,10 @@ contract PaymentLinkScriptsTest is Test {
     function test_pinnedAddresses_matchSaltsAndDeployer() public view {
         assertEq(CREATE3.predictDeterministicAddress(keccak256("Prod.PaymentLink.PaymentLinkModuleProxy"), address(DEPLOYER)), PROD_PROXY);
         assertEq(CREATE3.predictDeterministicAddress(keccak256("Prod.PaymentLink.PaymentLinkModuleImpl"), address(DEPLOYER)), PROD_IMPL);
-        assertEq(CREATE3.predictDeterministicAddress(keccak256("Dev.PaymentLink.PaymentLinkModuleProxy"), address(DEPLOYER)), DEV_PROXY);
-        assertEq(CREATE3.predictDeterministicAddress(keccak256("Dev.PaymentLink.PaymentLinkModuleImpl"), address(DEPLOYER)), DEV_IMPL);
+        assertEq(CREATE3.predictDeterministicAddress(keccak256("Dev.PaymentLink.PaymentLinkModuleProxy.V2"), address(DEPLOYER)), DEV_PROXY);
+        assertEq(CREATE3.predictDeterministicAddress(keccak256("Dev.PaymentLink.PaymentLinkModuleImpl.V2"), address(DEPLOYER)), DEV_IMPL);
         assertEq(DEPLOYER.getDeterministicAddress(keccak256("Prod.PaymentLink.PaymentLinkModuleProxy")), PROD_PROXY);
-        assertEq(DEPLOYER.getDeterministicAddress(keccak256("Dev.PaymentLink.PaymentLinkModuleProxy")), DEV_PROXY);
+        assertEq(DEPLOYER.getDeterministicAddress(keccak256("Dev.PaymentLink.PaymentLinkModuleProxy.V2")), DEV_PROXY);
     }
 
     function test_prod_deployVerifyEnable3CP_endToEnd() public {

@@ -29,8 +29,8 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
 
     // ---- CREATE3 salts (env-prefixed) ----
 
-    string internal constant DEV_SALT_MODULE_IMPL = "Dev.PaymentLink.PaymentLinkModuleImpl";
-    string internal constant DEV_SALT_MODULE_PROXY = "Dev.PaymentLink.PaymentLinkModuleProxy";
+    string internal constant DEV_SALT_MODULE_IMPL = "Dev.PaymentLink.PaymentLinkModuleImpl.V2";
+    string internal constant DEV_SALT_MODULE_PROXY = "Dev.PaymentLink.PaymentLinkModuleProxy.V2";
     string internal constant PROD_SALT_MODULE_IMPL = "Prod.PaymentLink.PaymentLinkModuleImpl";
     string internal constant PROD_SALT_MODULE_PROXY = "Prod.PaymentLink.PaymentLinkModuleProxy";
 
@@ -40,10 +40,10 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
     // so pinning them turns a salt typo into a loud pre-broadcast failure instead of a deploy at
     // an address that off-chain consumers and the enable bundle do not expect.
 
-    /// @notice `Dev.PaymentLink.PaymentLinkModuleImpl` (Optimism).
-    address internal constant EXPECTED_DEV_MODULE_IMPL = 0x0393014ce03Fe8F0EfeF0817D7c439474ff748dD;
-    /// @notice `Dev.PaymentLink.PaymentLinkModuleProxy` (Optimism).
-    address internal constant EXPECTED_DEV_MODULE_PROXY = 0x1bfCca1f03252D6734dCaB45F37AE3f81f6E0781;
+    /// @notice `Dev.PaymentLink.PaymentLinkModuleImpl.V2` (Optimism).
+    address internal constant EXPECTED_DEV_MODULE_IMPL = 0x7ead558E8e8918590414d2B8E4A02E18716d45d8;
+    /// @notice `Dev.PaymentLink.PaymentLinkModuleProxy.V2` (Optimism).
+    address internal constant EXPECTED_DEV_MODULE_PROXY = 0x3753EB90B48028e64f4F042E08358b00E9B11822;
     /// @notice `Prod.PaymentLink.PaymentLinkModuleImpl` (Optimism).
     address internal constant EXPECTED_PROD_MODULE_IMPL = 0x4d3B98947f10c36FE495110186fF854aB0F5593f;
     /// @notice `Prod.PaymentLink.PaymentLinkModuleProxy` (Optimism).

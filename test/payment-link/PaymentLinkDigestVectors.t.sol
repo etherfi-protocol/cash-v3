@@ -42,8 +42,8 @@ contract PaymentLinkDigestVectorsTest is Test {
     string internal constant FIXTURE = "test/payment-link/fixtures/digest-vectors.json";
 
     uint256 internal constant CHAIN_ID = 10;
-    /// @dev CREATE3 address of `Dev.PaymentLink.PaymentLinkModuleProxy` via the EtherFiDeployer.
-    address internal constant DEV_MODULE = 0x1bfCca1f03252D6734dCaB45F37AE3f81f6E0781;
+    /// @dev CREATE3 address of `Dev.PaymentLink.PaymentLinkModuleProxy.V2` via the EtherFiDeployer.
+    address internal constant DEV_MODULE = 0x3753EB90B48028e64f4F042E08358b00E9B11822;
     /// @dev CREATE3 address of `Prod.PaymentLink.PaymentLinkModuleProxy` via the EtherFiDeployer.
     address internal constant PROD_MODULE = 0x7402a988651bAF0558642647e0D7366D939d35c4;
 

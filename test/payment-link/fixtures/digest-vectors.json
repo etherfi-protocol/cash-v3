@@ -11,7 +11,7 @@
     {
       "name": "dev-usdc-25-fee30-nonce0",
       "inputs": {
-        "module": "0x1bfCca1f03252D6734dCaB45F37AE3f81f6E0781",
+        "module": "0x3753EB90B48028e64f4F042E08358b00E9B11822",
         "safe": "0x1111111111111111111111111111111111111111",
         "token": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
         "amount": "25000000",
@@ -24,15 +24,15 @@
         "minRefund": "25000000"
       },
       "expected": {
-        "domainSeparator": "0x05e337e055308c915d5b3cd3dbeedeef3642a6a9670286786c6c59b129f04f70",
-        "requestLinkMessageHash": "0x4a21ace3e546effd721772ba38d387fe1708d81ed658c11265309d9f33598825",
-        "requestLinkDigest": "0x30f3ad93293c84faf924e08ccbaf9ff0c15bd0d294e406d22520fb13ba373b94",
-        "requestLinkSignature": "0x1e3633f25cae56fa3148870740b3a1ee50416bf6118fa7becec73005e984eaf2631564b9b4fdec67e4e84c27bdf64c0cecd676bd6deb19a0b21e6b86aad199db1c",
-        "cancelLinkMessageHash": "0xbc2cff4a9d51290fba5ca9582168192f171c2e9d8bbaee0c664cf09f11a1ef66",
-        "cancelLinkDigest": "0xfcfce7eef17dd3b3553e1d0d77404dc47677f6d7cd31d33bb329dc6fb91289f6",
+        "domainSeparator": "0x6c9095292cd634b4644c4d110c47ae0fbd51259c660d138f4debc99d217bcd30",
+        "requestLinkMessageHash": "0x230028be00f78c58ea03d1bc92c8cd376318a8e826f8b8cd75d2b97df0656b8e",
+        "requestLinkDigest": "0x8016def74a193cb53e964992f84a26a64236dadb390f95c5485b6e4c7502dd8d",
+        "requestLinkSignature": "0x765bb08a712f7ad058787ac9b191219f5c509125e1f46fe54abded2c9a05b789444d718a8c3daa42f3035f9aef9d15da2473fe9b126be0c94b52bc948f528abc1c",
+        "cancelLinkMessageHash": "0x1a49aa65ab94021541abd7505229ec410282091819c0c35468f013f022aa273e",
+        "cancelLinkDigest": "0xea2c5d02db2507f37ca645c6704ac44514e631cd370875f0de968ba0a7ec6a02",
         "claimStructHash": "0x96b3103f56992a6aca874ae6b7a7e8669b3e3612c34c7a30cbb11dea90285ffd",
-        "claimDigest": "0xb5430e5e860095b79c28ad95f9bf3e6da9779e553af8a90f87bdc05afda75dff",
-        "claimSignature": "0xa65281ade66ffd733b7e565d0e6a2479a64085955066b5b34a85fb9dcff4adda2ea3c362b8c50fdf6a74ff53b9d9c9e4360fae927978b9071702ee96f1ac5edf1b"
+        "claimDigest": "0x958d79fe1a4ad0320ae483305b8332bdb7a42c4498eb4ae25a5cdd94ef758748",
+        "claimSignature": "0x5ce5d991b236a25d8246c6bcc5b493e1aca58a60991e22d3509cfe60bc127dbb7d2cdb56232a573eaf5ccdf6bd1d1868023398c0a81d1e553906812029000c941b"
       }
     },
     {
