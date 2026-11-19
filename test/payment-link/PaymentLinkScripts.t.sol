@@ -44,12 +44,10 @@ contract DeployHarness is DeployPaymentLinkModule {
 contract VerifyHarness is VerifyPaymentLinkModule {
     string internal env_;
     bool internal deployOnly_;
-    address internal devFeeReceiver_;
 
-    constructor(string memory env__, bool deployOnly__, address devFeeReceiver__) {
+    constructor(string memory env__, bool deployOnly__) {
         env_ = env__;
         deployOnly_ = deployOnly__;
-        devFeeReceiver_ = devFeeReceiver__;
     }
 
     function _env() internal view override returns (string memory) {
@@ -58,10 +56,6 @@ contract VerifyHarness is VerifyPaymentLinkModule {
 
     function _deployOnly() internal view override returns (bool) {
         return deployOnly_;
-    }
-
-    function _devFeeReceiver(Stack memory) internal view override returns (address) {
-        return devFeeReceiver_;
     }
 }
 
@@ -283,7 +277,7 @@ contract PaymentLinkScriptsTest is Test {
         assertEq(feeReceiver, address(0));
 
         // 2. Verification between deploy and the 3CP, plus the bytecode proof.
-        new VerifyHarness("mainnet", true, address(0)).run();
+        new VerifyHarness("mainnet", true).run();
         new BytecodeHarness("mainnet").run();
 
         // 3. The enable 3CP: writes both bundles and simulates schedule -> 8h -> execute.
@@ -293,12 +287,12 @@ contract PaymentLinkScriptsTest is Test {
         _assertBundle(gen.step2Path(), bytes4(keccak256("executeBatch(address[],uint256[],bytes[],bytes32,bytes32)")));
 
         // 4. The simulated end state passes the full verification.
-        new VerifyHarness("mainnet", false, address(0)).run();
+        new VerifyHarness("mainnet", false).run();
         assertTrue(prodDataProvider.isWhitelistedModule(PROD_PROXY));
         assertFalse(prodDataProvider.isDefaultModule(PROD_PROXY));
         (feeBps, feeReceiver) = PaymentLinkModule(PROD_PROXY).getFee();
-        assertEq(feeBps, 30);
-        assertEq(feeReceiver, PROD_SAFE);
+        assertEq(feeBps, 0);
+        assertEq(feeReceiver, address(0));
 
         // 5. Re-running is refused: mainnet never reuses code at the pinned addresses,
         //    and the 3CP refuses to rebuild an applied bundle.
@@ -306,7 +300,7 @@ contract PaymentLinkScriptsTest is Test {
         vm.expectRevert(bytes("mainnet: code already exists at the pinned impl address - refusing to reuse it"));
         redeploy.run();
         Enable3CPHarness again = _new3CP();
-        vm.expectRevert(bytes("module fee already configured - enable already done?"));
+        vm.expectRevert(bytes("module already whitelisted - enable already done?"));
         again.run();
 
         vm.removeFile(gen.step1Path());
@@ -327,8 +321,8 @@ contract PaymentLinkScriptsTest is Test {
         assertTrue(devDataProvider.isWhitelistedModule(DEV_PROXY));
         assertFalse(devDataProvider.isDefaultModule(DEV_PROXY));
         (uint16 feeBps, address feeReceiver) = PaymentLinkModule(DEV_PROXY).getFee();
-        assertEq(feeBps, 30);
-        assertEq(feeReceiver, deployerAddr);
+        assertEq(feeBps, 0);
+        assertEq(feeReceiver, address(0));
         assertEq(address(PaymentLinkModule(DEV_PROXY).cashModule()), address(devCashModule));
         assertTrue(PaymentLinkModule(DEV_PROXY).isTokenAllowed(USDC), "dev deploy allows USDC");
         assertTrue(PaymentLinkModule(DEV_PROXY).isTokenAllowed(EURC), "dev deploy allows EURC");
@@ -344,7 +338,7 @@ contract PaymentLinkScriptsTest is Test {
         }
 
         // The verifier passes (including its own prod-isolation checks) and the bytecode matches.
-        new VerifyHarness("dev", false, deployerAddr).run();
+        new VerifyHarness("dev", false).run();
         new BytecodeHarness("dev").run();
 
         // A re-run deploys nothing and re-wires nothing.
@@ -355,11 +349,20 @@ contract PaymentLinkScriptsTest is Test {
         for (uint256 i = 0; i < logs.length; i++) {
             assertTrue(logs[i].emitter != DEV_PROXY && logs[i].emitter != address(devDataProvider), "re-run emitted state changes");
         }
+
+        // A dev module that an earlier run gave a fee: a re-run turns it off.
+        vm.prank(deployerAddr);
+        PaymentLinkModule(DEV_PROXY).setFee(30, deployerAddr);
+        new DeployHarness("dev", deployerPk).run();
+        (feeBps, feeReceiver) = PaymentLinkModule(DEV_PROXY).getFee();
+        assertEq(feeBps, 0);
+        assertEq(feeReceiver, address(0));
+        new VerifyHarness("dev", false).run();
     }
 
     function test_verify_detectsHijackedProxy() public {
         _deployProd();
-        VerifyHarness verifier = new VerifyHarness("mainnet", true, address(0));
+        VerifyHarness verifier = new VerifyHarness("mainnet", true);
         verifier.run();
 
         uint256 snap = vm.snapshotState();
@@ -735,7 +738,7 @@ contract PaymentLinkScriptsTest is Test {
                 assertTrue(tokens[i] != tokens[j], "duplicate launch token");
             }
         }
-        assertEq(targets.length, 3 + tokens.length);
+        assertEq(targets.length, 2 + tokens.length);
         assertEq(values.length, targets.length);
         assertEq(payloads.length, targets.length);
         assertEq(targets[0], address(prodDataProvider));
@@ -752,9 +755,8 @@ contract PaymentLinkScriptsTest is Test {
         enable[0] = true;
         assertEq(payloads[0], abi.encodeCall(EtherFiDataProvider.configureModules, (modules, enable)));
         assertEq(payloads[1], abi.encodeCall(ICashModule.configureModulesCanRequestWithdraw, (modules, enable)));
-        assertEq(payloads[2], abi.encodeCall(PaymentLinkModule.setFee, (30, PROD_SAFE)));
         for (uint256 i = 0; i < tokens.length; i++) {
-            assertEq(payloads[3 + i], abi.encodeCall(PaymentLinkModule.setTokenAllowed, (tokens[i], true)));
+            assertEq(payloads[2 + i], abi.encodeCall(PaymentLinkModule.setTokenAllowed, (tokens[i], true)));
         }
     }
 

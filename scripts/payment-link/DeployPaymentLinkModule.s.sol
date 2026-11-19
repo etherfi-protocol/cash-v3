@@ -19,7 +19,7 @@ import { PaymentLinkConfig } from "./PaymentLinkConfig.sol";
  *         - ENV=dev:      the broadcaster holds every role on the dev RoleRegistry, so the script
  *                         also wires the module into the DEV stack only: whitelisted (not default)
  *                         on the dev DataProvider, allowed to request withdrawals on the dev
- *                         CashModule, the launch fee with the broadcaster as receiver, and the
+ *                         CashModule, the fee off (reset if an earlier run set one), and the
  *                         launch tokens (`_launchTokens()`) on the token allowlist.
  *         - ENV=mainnet:  only the unprivileged CREATE3 deploys. Enabling is the 3CP built by
  *                         scripts/gnosis-txs/EnablePaymentLinkModuleOP3CP.s.sol.
@@ -27,8 +27,9 @@ import { PaymentLinkConfig } from "./PaymentLinkConfig.sol";
  *         Code at the pinned addresses: a CREATE3 address does not commit to bytecode.
  *         On mainnet the script refuses to run if either address already has code, instead of
  *         reusing it. On dev existing deployments are reused and wiring already in place is
- *         skipped, so a re-run changes nothing. In both envs the script then rebuilds the impl
- *         and proxy locally and requires the deployed runtime code to match.
+ *         skipped, so a re-run changes nothing unless it finds a fee on, which it turns off. In
+ *         both envs the script then rebuilds the impl and proxy locally and requires the
+ *         deployed runtime code to match.
  *
  * Addresses (DataProvider, RoleRegistry, CashModule) come from deployments/{ENV}/10/deployments.json.
  *
@@ -59,10 +60,10 @@ contract DeployPaymentLinkModule is PaymentLinkConfig {
 
         vm.startBroadcast(deployerPk);
         _deploy();
-        if (_isDev()) _wireDev(deployerAddress);
+        if (_isDev()) _wireDev();
         vm.stopBroadcast();
 
-        _postflight(deployerAddress);
+        _postflight();
         // Must be the last check: nothing in this run may have moved RoleRegistry ownership.
         require(stack.roleRegistry.owner() == ownerBefore, "CRITICAL: RoleRegistry owner changed");
 
@@ -101,9 +102,9 @@ contract DeployPaymentLinkModule is PaymentLinkConfig {
         proxy = _create3(_moduleProxySalt(), _expectedProxyInitCode(stack, impl), "");
     }
 
-    /// @dev DEV ONLY: the four enable calls, each skipped when already applied. On prod these
-    ///      ship as the timelocked 3CP, because they need ADMIN_TIMELOCK_ROLE.
-    function _wireDev(address devAdmin) internal {
+    /// @dev DEV ONLY: the enable calls, each skipped when already applied. On prod these ship as
+    ///      the timelocked 3CP, because they need ADMIN_TIMELOCK_ROLE.
+    function _wireDev() internal {
         address[] memory modules = new address[](1);
         modules[0] = proxy;
         bool[] memory enable = new bool[](1);
@@ -112,8 +113,9 @@ contract DeployPaymentLinkModule is PaymentLinkConfig {
         if (!stack.dataProvider.isWhitelistedModule(proxy)) stack.dataProvider.configureModules(modules, enable);
         if (!_canRequestWithdraw(stack.cashModule, proxy)) stack.cashModule.configureModulesCanRequestWithdraw(modules, enable);
 
+        // The fee stays off; this turns off a fee an earlier dev run set.
         (uint16 feeBps, address feeReceiver) = PaymentLinkModule(proxy).getFee();
-        if (feeBps != LAUNCH_FEE_BPS || feeReceiver != devAdmin) PaymentLinkModule(proxy).setFee(LAUNCH_FEE_BPS, devAdmin);
+        if (feeBps != DEPLOY_FEE_BPS || feeReceiver != DEPLOY_FEE_RECEIVER) PaymentLinkModule(proxy).setFee(DEPLOY_FEE_BPS, DEPLOY_FEE_RECEIVER);
 
         address[] memory tokens = _launchTokens();
         for (uint256 i = 0; i < tokens.length; i++) {
@@ -122,7 +124,7 @@ contract DeployPaymentLinkModule is PaymentLinkConfig {
     }
 
     /// @dev The deployment landed where expected, runs this commit's code, and the proxy is ours.
-    function _postflight(address devAdmin) internal {
+    function _postflight() internal {
         require(impl == _expectedImpl(), "impl did not land at the pinned address");
         require(proxy == _expectedProxy(), "proxy did not land at the pinned address");
         require(_implOf(proxy) == impl, "proxy impl slot != deployed impl");
@@ -138,7 +140,7 @@ contract DeployPaymentLinkModule is PaymentLinkConfig {
             require(!stack.dataProvider.isDefaultModule(proxy), "dev: module must not be a default module");
             require(_canRequestWithdraw(stack.cashModule, proxy), "dev: module cannot request withdrawals");
             (uint16 feeBps, address feeReceiver) = module.getFee();
-            require(feeBps == LAUNCH_FEE_BPS && feeReceiver == devAdmin, "dev: fee not set");
+            require(feeBps == DEPLOY_FEE_BPS && feeReceiver == DEPLOY_FEE_RECEIVER, "dev: fee is not off");
             address[] memory tokens = _launchTokens();
             for (uint256 i = 0; i < tokens.length; i++) {
                 require(module.isTokenAllowed(tokens[i]), "dev: a launch token is not allowed");

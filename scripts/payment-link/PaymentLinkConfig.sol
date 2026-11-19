@@ -20,7 +20,7 @@ import { EtherFiDeployerHelper } from "../utils/EtherFiDeployerHelper.sol";
  * @notice Shared configuration for the PaymentLinkModule deploy, verify and 3CP scripts on
  *         Optimism: env-prefixed CREATE3 salts (dev and prod land at distinct deterministic
  *         addresses through the EtherFiDeployer), the pinned addresses those salts resolve to,
- *         the prod governance addresses and the launch fee.
+ *         the prod governance addresses and the fee.
  * @dev The dev instance is a separate deployment on Optimism mainnet that registers only with
  *      the dev cash-v3 stack (deployments/dev/10). There are no testnet or fork environments.
  */
@@ -62,15 +62,11 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
 
     // ---- Fees ----
 
-    /// @notice The proxy is initialised with the fee off: an unprivileged deployer key never
-    ///         chooses the fee receiver. The enable step (3CP on prod) sets the launch fee.
+    /// @notice The proxy is initialised with the fee off, and the module launches with it off:
+    ///         the enable step (3CP on prod) does not call `setFee`, so claims carry no fee. An
+    ///         unprivileged deployer key never chooses a fee receiver.
     uint16 internal constant DEPLOY_FEE_BPS = 0;
     address internal constant DEPLOY_FEE_RECEIVER = address(0);
-
-    /// @notice Launch fee on claims to non-safe recipients.
-    uint16 internal constant LAUNCH_FEE_BPS = 30;
-    /// @notice Prod fee receiver: the prod Safe, as for StockWithdrawModule.
-    address internal constant PROD_FEE_RECEIVER = PROD_SAFE;
 
     // ---- Token allowlist ----
 
@@ -262,11 +258,6 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
 
     function _expectedProxy() internal view returns (address) {
         return _isDev() ? EXPECTED_DEV_MODULE_PROXY : EXPECTED_PROD_MODULE_PROXY;
-    }
-
-    /// @dev The fee receiver the enable step sets: the dev admin on dev, `PROD_FEE_RECEIVER` on prod.
-    function _feeReceiverFor(address devAdmin) internal view returns (address) {
-        return _isDev() ? devAdmin : PROD_FEE_RECEIVER;
     }
 
     // ---- Stack addresses ----

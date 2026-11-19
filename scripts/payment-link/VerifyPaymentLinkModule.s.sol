@@ -18,15 +18,14 @@ import { PaymentLinkConfig } from "./PaymentLinkConfig.sol";
  *         immutables (DataProvider, CashModule) and their cross-references, the EIP-712 domain,
  *         and the RoleRegistry owner (the 2-day upgrade timelock on prod). Then the wiring:
  *         - default (after enable): whitelisted on the DataProvider but NOT a default module,
- *           allowed to request withdrawals on the CashModule, launch fee set, every launch token
+ *           allowed to request withdrawals on the CashModule, fee off, every launch token
  *           (`_launchTokens()`) allowed.
  *         - PAYMENT_LINK_VERIFY_DEPLOY_ONLY=true (between deploy and the enable 3CP): fee off and
  *           not yet registered anywhere.
  *         On dev it also reads the PROD DataProvider and CashModule and requires that the dev
  *         instance is registered on neither, so it can never pull from production safes.
  *
- * Env: ENV (dev|mainnet), PAYMENT_LINK_VERIFY_DEPLOY_ONLY (optional, default false),
- *      PAYMENT_LINK_DEV_FEE_RECEIVER (dev only; defaults to the dev RoleRegistry owner)
+ * Env: ENV (dev|mainnet), PAYMENT_LINK_VERIFY_DEPLOY_ONLY (optional, default false)
  *
  * Run: forge script scripts/payment-link/VerifyPaymentLinkModule.s.sol --rpc-url $OPTIMISM_RPC
  */
@@ -51,12 +50,6 @@ contract VerifyPaymentLinkModule is PaymentLinkConfig {
     /// @dev PAYMENT_LINK_VERIFY_DEPLOY_ONLY. Virtual for script tests.
     function _deployOnly() internal view virtual returns (bool) {
         return vm.envOr("PAYMENT_LINK_VERIFY_DEPLOY_ONLY", false);
-    }
-
-    /// @dev PAYMENT_LINK_DEV_FEE_RECEIVER, defaulting to the dev RoleRegistry owner (the dev
-    ///      deploy sets the broadcaster as receiver). Virtual for script tests.
-    function _devFeeReceiver(Stack memory s) internal view virtual returns (address) {
-        return vm.envOr("PAYMENT_LINK_DEV_FEE_RECEIVER", s.roleRegistry.owner());
     }
 
     /// @dev Address, proxy-integrity, initialisation and immutable checks. Returns the proxy.
@@ -96,9 +89,7 @@ contract VerifyPaymentLinkModule is PaymentLinkConfig {
         require(_canRequestWithdraw(s.cashModule, proxy), "module cannot request withdrawals on the CashModule");
 
         (uint16 feeBps, address feeReceiver) = PaymentLinkModule(proxy).getFee();
-        require(feeBps == LAUNCH_FEE_BPS, "fee mismatch");
-        address expectedReceiver = _isDev() ? _devFeeReceiver(s) : PROD_FEE_RECEIVER;
-        require(feeReceiver == expectedReceiver, "fee receiver mismatch");
+        require(feeBps == DEPLOY_FEE_BPS && feeReceiver == DEPLOY_FEE_RECEIVER, "fee is not off");
 
         address[] memory tokens = _launchTokens();
         for (uint256 i = 0; i < tokens.length; i++) {

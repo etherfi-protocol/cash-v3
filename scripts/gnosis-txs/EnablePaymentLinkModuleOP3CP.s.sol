@@ -26,9 +26,11 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  *
  *           EtherFiDataProvider.configureModules([module], [true])           whitelist only, NOT default
  *           CashModule.configureModulesCanRequestWithdraw([module], [true])  needs the whitelist first
- *           PaymentLinkModule.setFee(LAUNCH_FEE_BPS, PROD_FEE_RECEIVER)
  *           PaymentLinkModule.setTokenAllowed(token, true)                     one call per launch token,
  *                                                                              in `_launchTokens()` order
+ *
+ *         There is no `setFee` call: the module keeps the fee it was initialised with (0 bps, no
+ *         receiver), so claims carry no fee.
  *
  *         Whitelist-only: the module is never enabled on safes, so it has no
  *         `execTransactionFromModule` authority; it only receives CashModule withdrawals.
@@ -133,9 +135,9 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
         _requireBuiltCode(s, impl, address(module));
         _requireProxyProvenance(s, impl, PROD_SALT_MODULE_PROXY, _proxyDeployTx());
 
-        // Deploy-time state, so the bundle is not already applied (idempotence).
+        // Deploy-time state, so the bundle is not already applied (idempotence). The fee stays off.
         (uint16 feeBps, address feeReceiver) = module.getFee();
-        require(feeBps == DEPLOY_FEE_BPS && feeReceiver == DEPLOY_FEE_RECEIVER, "module fee already configured - enable already done?");
+        require(feeBps == DEPLOY_FEE_BPS && feeReceiver == DEPLOY_FEE_RECEIVER, "module fee is not off");
         require(!s.dataProvider.isWhitelistedModule(address(module)), "module already whitelisted - enable already done?");
         require(!_canRequestWithdraw(s.cashModule, address(module)), "module already allowed to request withdrawals");
         address[] memory launchTokens = _launchTokens();
@@ -144,10 +146,6 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
         }
         _requireLaunchTokensWithdrawable(s.cashModule);
         require(!module.paused(), "module is paused");
-
-        // Launch config is valid for setFee.
-        require(LAUNCH_FEE_BPS <= module.MAX_FEE_BPS(), "launch fee above MAX_FEE_BPS");
-        require(PROD_FEE_RECEIVER != address(0), "launch fee needs a receiver");
 
         // Governance: ADMIN_TIMELOCK_ROLE sits with the 8h operating timelock, the Safe proposes and executes.
         require(s.roleRegistry.owner() == UPGRADE_TIMELOCK, "RoleRegistry owner is not the upgrade timelock");
@@ -176,8 +174,6 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
         payloads.push(abi.encodeCall(EtherFiDataProvider.configureModules, (modules, enable)));
         targets.push(address(s.cashModule));
         payloads.push(abi.encodeCall(ICashModule.configureModulesCanRequestWithdraw, (modules, enable)));
-        targets.push(address(module));
-        payloads.push(abi.encodeCall(PaymentLinkModule.setFee, (LAUNCH_FEE_BPS, PROD_FEE_RECEIVER)));
         address[] memory launchTokens = _launchTokens();
         for (uint256 i = 0; i < launchTokens.length; i++) {
             targets.push(address(module));
@@ -232,7 +228,7 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
         require(!s.dataProvider.isDefaultModule(address(module)), "SIM FAILED: module must not be a default module");
         require(_canRequestWithdraw(s.cashModule, address(module)), "SIM FAILED: module cannot request withdrawals");
         (uint16 feeBps, address feeReceiver) = module.getFee();
-        require(feeBps == LAUNCH_FEE_BPS && feeReceiver == PROD_FEE_RECEIVER, "SIM FAILED: fee not set");
+        require(feeBps == DEPLOY_FEE_BPS && feeReceiver == DEPLOY_FEE_RECEIVER, "SIM FAILED: fee is not off");
         address[] memory launchTokens = _launchTokens();
         for (uint256 i = 0; i < launchTokens.length; i++) {
             require(module.isTokenAllowed(launchTokens[i]), "SIM FAILED: a launch token is not allowed");
