@@ -17,7 +17,7 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  * @notice Builds the Safe bundles that turn the deployed prod PaymentLinkModule on, then
  *         simulates them on the current fork and asserts the end state. Nothing is broadcast.
  *
- *         All eight calls are gated by ADMIN_TIMELOCK_ROLE, which on Optimism is held ONLY by
+ *         Every call is gated by ADMIN_TIMELOCK_ROLE, which on Optimism is held ONLY by
  *         the 8h operating timelock (the Safe does not hold it), so they ship as one timelock
  *         batch in two Safe bundles:
  *
@@ -27,11 +27,8 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  *           EtherFiDataProvider.configureModules([module], [true])           whitelist only, NOT default
  *           CashModule.configureModulesCanRequestWithdraw([module], [true])  needs the whitelist first
  *           PaymentLinkModule.setFee(LAUNCH_FEE_BPS, PROD_FEE_RECEIVER)
- *           PaymentLinkModule.setTokenAllowed(USDC, true)                      launch tokens, one call each
- *           PaymentLinkModule.setTokenAllowed(EURC, true)
- *           PaymentLinkModule.setTokenAllowed(USDT0, true)
- *           PaymentLinkModule.setTokenAllowed(ZCHF, true)
- *           PaymentLinkModule.setTokenAllowed(WETH, true)
+ *           PaymentLinkModule.setTokenAllowed(token, true)                     one call per launch token,
+ *                                                                              in `_launchTokens()` order
  *
  *         Whitelist-only: the module is never enabled on safes, so it has no
  *         `execTransactionFromModule` authority; it only receives CashModule withdrawals.
@@ -190,14 +187,17 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
         require(!_isOperation(), "enable batch already scheduled");
     }
 
+    // The calldata is hex-encoded with the `vm.toString` cheatcode rather than `iToHex`: with one
+    // `setTokenAllowed` per launch token the batch is about 27 KB, and `iToHex`'s byte-by-byte loop
+    // would run past a block's gas. Both give the same lowercase 0x-prefixed hex.
     function _scheduleTx(bool isLast) internal view returns (string memory) {
         bytes memory data = abi.encodeWithSignature("scheduleBatch(address[],uint256[],bytes[],bytes32,bytes32,uint256)", targets, new uint256[](targets.length), payloads, TL_PREDECESSOR, TL_SALT, OPERATING_TIMELOCK_DELAY);
-        return _getGnosisTransaction(addressToHex(OPERATING_TIMELOCK), iToHex(data), "0", isLast);
+        return _getGnosisTransaction(addressToHex(OPERATING_TIMELOCK), vm.toString(data), "0", isLast);
     }
 
     function _executeTx(bool isLast) internal view returns (string memory) {
         bytes memory data = abi.encodeWithSignature("executeBatch(address[],uint256[],bytes[],bytes32,bytes32)", targets, new uint256[](targets.length), payloads, TL_PREDECESSOR, TL_SALT);
-        return _getGnosisTransaction(addressToHex(OPERATING_TIMELOCK), iToHex(data), "0", isLast);
+        return _getGnosisTransaction(addressToHex(OPERATING_TIMELOCK), vm.toString(data), "0", isLast);
     }
 
     function _writeBundle(string memory step, string memory txs) internal returns (string memory path) {
@@ -258,11 +258,10 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
         console.log("       can request withdrawals on CashModule");
         console.log("       fee bps:", feeBps);
         console.log("       fee receiver:", feeReceiver);
-        console.log("       allowed tokens: USDC", LAUNCH_TOKEN_USDC);
-        console.log("                       EURC", LAUNCH_TOKEN_EURC);
-        console.log("                       USDT0", LAUNCH_TOKEN_USDT0);
-        console.log("                       ZCHF", LAUNCH_TOKEN_ZCHF);
-        console.log("                       WETH", LAUNCH_TOKEN_WETH);
+        console.log("       allowed tokens:", launchTokens.length);
+        for (uint256 i = 0; i < launchTokens.length; i++) {
+            console.log("        ", launchTokens[i]);
+        }
         console.log("  [OK] pause/unpause verified; RoleRegistry owner unchanged");
         console.log("EnablePaymentLinkModuleOP3CP simulation passed. Run VerifyPaymentLinkModule.s.sol after execution.");
     }

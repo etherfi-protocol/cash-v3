@@ -2,18 +2,29 @@
 pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
+import { console } from "forge-std/console.sol";
 
+import { PaymentLinkConfig } from "../../scripts/payment-link/PaymentLinkConfig.sol";
 import { IPaymentLinkModule } from "../../src/interfaces/IPaymentLinkModule.sol";
 import { PaymentLinkModuleTestSetup } from "./PaymentLinkModuleTestSetup.t.sol";
 
+/// @dev The launch token list the deploy, verify and enable scripts use.
+contract LaunchTokenList is PaymentLinkConfig {
+    function tokens() external pure returns (address[] memory) {
+        return _launchTokens();
+    }
+}
+
 /**
  * @title PaymentLinkLaunchTokensTest
- * @notice Round-trips each launch token (USDC, EURC, USDT0 at 6 decimals; ZCHF, WETH at 18) through the module against the REAL token contract on an
+ * @notice Round-trips every launch token through the module against the REAL token contract on an
  *         Optimism fork, no mocks: request and fund a link, claim it to an external address
  *         (paying the fee), then request, fund and cancel a second one. Every step asserts exact
  *         balance deltas for the safe, the module, the recipient and the fee receiver, and that
  *         liabilities return to zero. This is the evidence that each token moves exact amounts in
- *         and out of the module, which the allowlist requires.
+ *         and out of the module, which the allowlist requires. USDC, EURC, USDT0 (6 decimals) and
+ *         ZCHF, WETH (18) have their own tests; `test_everyLaunchToken_movesExactAmounts` covers the
+ *         whole `_launchTokens()` list and names every token that fails.
  * @dev Run with: TEST_CHAIN=10 TEST_RPC=<optimism rpc> forge test --match-path test/payment-link/PaymentLinkLaunchTokens.t.sol
  */
 contract PaymentLinkLaunchTokensTest is PaymentLinkModuleTestSetup {
@@ -126,5 +137,68 @@ contract PaymentLinkLaunchTokensTest is PaymentLinkModuleTestSetup {
 
         deal(token, address(safe), 10 * linkAmount);
         assertEq(_bal(token, address(safe)), 10 * linkAmount, "deal reached the token's balance slot");
+    }
+
+    /// @dev Every token the scripts allow, round-tripped one by one. A failure doesn't stop the
+    ///      run, so the log names every token that fails before the test does.
+    function test_everyLaunchToken_movesExactAmounts() public {
+        address[] memory tokens = new LaunchTokenList().tokens();
+        uint256 passed;
+        uint256 failures;
+        for (uint256 i = 0; i < tokens.length; i++) {
+            try this.roundTripAny(tokens[i]) {
+                passed++;
+            } catch Error(string memory reason) {
+                failures++;
+                console.log("FAIL", tokens[i], reason);
+            } catch {
+                failures++;
+                console.log("FAIL", tokens[i], "(no reason)");
+            }
+        }
+        assertEq(failures, 0, "launch tokens that don't move exact amounts");
+        assertEq(passed, tokens.length);
+    }
+
+    /// @dev `_roundTrip` for any token: an odd amount of about 1,234.567 units at the token's own
+    ///      decimals, with plain `require`s so `test_everyLaunchToken_movesExactAmounts` can catch a
+    ///      failure and carry on. External only so it can run under try/catch.
+    function roundTripAny(address token) external {
+        require(msg.sender == address(this), "self only");
+        uint8 decimals = IERC20Metadata(token).decimals();
+        uint256 amount = 1234 * 10 ** decimals + (decimals >= 3 ? 567 * 10 ** (decimals - 3) : 0) + (decimals >= 6 ? 891 : 0);
+
+        address[] memory assets = new address[](1);
+        assets[0] = token;
+        bool[] memory yes = new bool[](1);
+        yes[0] = true;
+        vm.startPrank(owner);
+        cashModule.configureWithdrawAssets(assets, yes);
+        plm.setTokenAllowed(token, true);
+        vm.stopPrank();
+        deal(token, address(safe), 10 * amount);
+        require(_bal(token, address(safe)) == 10 * amount, "deal: balance slot");
+
+        Start memory b = Start({ safe: _bal(token, address(safe)), module: _bal(token, address(plm)), recipient: _bal(token, externalRecipient), feeReceiver: _bal(token, plFeeReceiver) });
+
+        (address claimed, uint256 claimedPk) = _fundedLink(token, amount);
+        require(_bal(token, address(safe)) == b.safe - amount, "fund: safe debit");
+        require(_bal(token, address(plm)) == b.module + amount, "fund: module credit");
+        require(plm.getLiabilities(token) == amount, "fund: liabilities");
+
+        uint256 fee = amount * FEE_BPS / 10_000;
+        _claim(claimed, claimedPk, externalRecipient);
+        require(_status(claimed) == IPaymentLinkModule.LinkStatus.Claimed, "claim: status");
+        require(_bal(token, externalRecipient) == b.recipient + amount - fee, "claim: recipient credit");
+        require(_bal(token, plFeeReceiver) == b.feeReceiver + fee, "claim: fee credit");
+        require(_bal(token, address(plm)) == b.module, "claim: module debit");
+        require(plm.getLiabilities(token) == 0, "claim: liabilities");
+
+        (address cancelled,) = _fundedLink(token, amount);
+        _cancel(cancelled);
+        require(_status(cancelled) == IPaymentLinkModule.LinkStatus.Cancelled, "cancel: status");
+        require(_bal(token, address(safe)) == b.safe - amount, "cancel: safe refund");
+        require(_bal(token, address(plm)) == b.module, "cancel: module debit");
+        require(plm.getLiabilities(token) == 0, "cancel: liabilities");
     }
 }

@@ -121,6 +121,13 @@ contract BuiltCodeHarness is PaymentLinkConfig {
     }
 }
 
+/// @dev Exposes the launch token list the enable batch allows.
+contract LaunchTokensProbe is PaymentLinkConfig {
+    function launchTokens() external pure returns (address[] memory) {
+        return _launchTokens();
+    }
+}
+
 /// @dev Exposes the real `cast`-over-ffi transaction reader.
 contract ProvenanceProbe is PaymentLinkConfig {
     function fetch(bytes32 txHash) external returns (DeployTx memory) {
@@ -203,11 +210,12 @@ contract PaymentLinkScriptsTest is Test {
     bytes32 internal constant REAL_DEPLOY_TX = 0x4c0685a2f0eca4c8da73e2de9fac18691be90cd7a1bf543aaa7fd1b19a3b8bfe;
     bytes32 internal constant REAL_BLOCK_HASH = 0xb9728515776b3827d7efa7c94e25c8dc253ad759057889ad5a488cac6dc509cb;
     uint256 internal constant REAL_BLOCK_NUMBER = 155_269_969;
-    /// @dev An Optimism block from before any dev PaymentLinkModule existed: the first dev
-    ///      deployment, at the earlier dev salts, landed in block 159_052_547. The dev deploy tests
-    ///      fork here so they deploy THIS build fresh, whatever build is live at the pinned dev
-    ///      addresses.
-    uint256 internal constant BEFORE_DEV_DEPLOY_BLOCK = 159_052_546;
+    /// @dev The Optimism block just before the dev deployment at the current dev salts, which
+    ///      landed in block 159_704_052. The dev deploy tests fork here so they deploy THIS build
+    ///      fresh, whatever build is live at the pinned dev addresses. Every launch token is on the
+    ///      dev CashModule's withdraw-asset list at this block; the earlier dev module, at other
+    ///      salts and addresses, already exists here and is untouched.
+    uint256 internal constant BEFORE_DEV_DEPLOY_BLOCK = 159_704_051;
     bytes32 internal constant EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
     bytes32 internal constant UPGRADEABLE_PROXY_STORAGE_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
     bytes32 internal constant INITIALIZABLE_STORAGE_SLOT = 0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00;
@@ -700,8 +708,8 @@ contract PaymentLinkScriptsTest is Test {
         return new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, true, REAL_BLOCK_HASH, REAL_BLOCK_NUMBER);
     }
 
-    /// @dev A bundle is one Safe transaction to the operating timelock carrying the 3-call batch.
-    function _assertBundle(string memory path, bytes4 selector) internal view {
+    /// @dev A bundle is one Safe transaction to the operating timelock carrying the enable batch.
+    function _assertBundle(string memory path, bytes4 selector) internal {
         string memory json = vm.readFile(path);
         assertEq(json.readAddress(".safeAddress"), PROD_SAFE);
         assertEq(json.readString(".chainId"), "10");
@@ -715,13 +723,27 @@ contract PaymentLinkScriptsTest is Test {
             args[i] = data[i + 4];
         }
         (address[] memory targets, uint256[] memory values, bytes[] memory payloads) = abi.decode(args, (address[], uint256[], bytes[]));
-        assertEq(targets.length, 8);
+        address[] memory tokens = new LaunchTokensProbe().launchTokens();
+        assertEq(tokens.length, 118, "launch token count");
+        assertEq(tokens[0], USDC);
+        assertEq(tokens[1], EURC);
+        assertEq(tokens[2], USDT0);
+        assertEq(tokens[3], ZCHF);
+        assertEq(tokens[4], WETH);
+        for (uint256 i = 0; i < tokens.length; i++) {
+            for (uint256 j = i + 1; j < tokens.length; j++) {
+                assertTrue(tokens[i] != tokens[j], "duplicate launch token");
+            }
+        }
+        assertEq(targets.length, 3 + tokens.length);
+        assertEq(values.length, targets.length);
+        assertEq(payloads.length, targets.length);
         assertEq(targets[0], address(prodDataProvider));
         assertEq(targets[1], address(prodCashModule));
-        for (uint256 i = 2; i < 8; i++) {
+        for (uint256 i = 2; i < targets.length; i++) {
             assertEq(targets[i], PROD_PROXY);
         }
-        for (uint256 i = 0; i < 8; i++) {
+        for (uint256 i = 0; i < values.length; i++) {
             assertEq(values[i], 0);
         }
         address[] memory modules = new address[](1);
@@ -731,11 +753,9 @@ contract PaymentLinkScriptsTest is Test {
         assertEq(payloads[0], abi.encodeCall(EtherFiDataProvider.configureModules, (modules, enable)));
         assertEq(payloads[1], abi.encodeCall(ICashModule.configureModulesCanRequestWithdraw, (modules, enable)));
         assertEq(payloads[2], abi.encodeCall(PaymentLinkModule.setFee, (30, PROD_SAFE)));
-        assertEq(payloads[3], abi.encodeCall(PaymentLinkModule.setTokenAllowed, (USDC, true)));
-        assertEq(payloads[4], abi.encodeCall(PaymentLinkModule.setTokenAllowed, (EURC, true)));
-        assertEq(payloads[5], abi.encodeCall(PaymentLinkModule.setTokenAllowed, (USDT0, true)));
-        assertEq(payloads[6], abi.encodeCall(PaymentLinkModule.setTokenAllowed, (ZCHF, true)));
-        assertEq(payloads[7], abi.encodeCall(PaymentLinkModule.setTokenAllowed, (WETH, true)));
+        for (uint256 i = 0; i < tokens.length; i++) {
+            assertEq(payloads[3 + i], abi.encodeCall(PaymentLinkModule.setTokenAllowed, (tokens[i], true)));
+        }
     }
 
     function _assertNoDeploys(Vm.Log[] memory logs) internal pure {
