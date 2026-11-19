@@ -1,0 +1,93 @@
+{
+  "description": "PaymentLinkModule digest test vectors for off-chain signers. Private keys here are TEST-ONLY values 1, 2 and 3. requestLinkDigest and cancelLinkDigest are the EIP-191 hashes the module verifies, i.e. personal_sign over the 32-byte *MessageHash. The owners sign both; the link key also signs requestLinkDigest (requestLinkSignature: a raw ECDSA signature over requestLinkDigest itself, equivalently personal_sign over requestLinkMessageHash, never a second prefix over the digest). claimDigest is the EIP-712 hash of Claim(linkSigner, recipient, minAmount) the link key signs with a raw (no prefix) ECDSA signature. minAmount is the least the recipient must receive after the fee; minRefund is the least a cancel must return to the safe. Signatures are encoded r || s || v.",
+  "chainId": 10,
+  "domain": { "name": "EtherFi PaymentLinkModule", "version": "1" },
+  "constants": {
+    "REQUEST_LINK_SIG": "0x96ce2a10f4aca7aad88cfc2393b9f06787173ad58a703e28709b265e4eb47219",
+    "CANCEL_LINK_SIG": "0x7a6e0b50eb9375b8b820174ad38aa13adb271da103cbe31a4086a606036368f6",
+    "CLAIM_TYPEHASH": "0x7c628ec06d8bb7413094e25f4cdb1eaa9874e6d3655f62b089aa4269963520f8"
+  },
+  "vectors": [
+    {
+      "name": "dev-usdc-25-fee30-nonce0",
+      "inputs": {
+        "module": "0x3753EB90B48028e64f4F042E08358b00E9B11822",
+        "safe": "0x1111111111111111111111111111111111111111",
+        "token": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+        "amount": "25000000",
+        "linkSigner": "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
+        "linkSignerTestPrivateKey": "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "feeBps": 30,
+        "nonce": 0,
+        "recipient": "0x2222222222222222222222222222222222222222",
+        "minAmount": "24925000",
+        "minRefund": "25000000"
+      },
+      "expected": {
+        "domainSeparator": "0x6c9095292cd634b4644c4d110c47ae0fbd51259c660d138f4debc99d217bcd30",
+        "requestLinkMessageHash": "0x230028be00f78c58ea03d1bc92c8cd376318a8e826f8b8cd75d2b97df0656b8e",
+        "requestLinkDigest": "0x8016def74a193cb53e964992f84a26a64236dadb390f95c5485b6e4c7502dd8d",
+        "requestLinkSignature": "0x765bb08a712f7ad058787ac9b191219f5c509125e1f46fe54abded2c9a05b789444d718a8c3daa42f3035f9aef9d15da2473fe9b126be0c94b52bc948f528abc1c",
+        "cancelLinkMessageHash": "0x1a49aa65ab94021541abd7505229ec410282091819c0c35468f013f022aa273e",
+        "cancelLinkDigest": "0xea2c5d02db2507f37ca645c6704ac44514e631cd370875f0de968ba0a7ec6a02",
+        "claimStructHash": "0x96b3103f56992a6aca874ae6b7a7e8669b3e3612c34c7a30cbb11dea90285ffd",
+        "claimDigest": "0x958d79fe1a4ad0320ae483305b8332bdb7a42c4498eb4ae25a5cdd94ef758748",
+        "claimSignature": "0x5ce5d991b236a25d8246c6bcc5b493e1aca58a60991e22d3509cfe60bc127dbb7d2cdb56232a573eaf5ccdf6bd1d1868023398c0a81d1e553906812029000c941b"
+      }
+    },
+    {
+      "name": "prod-weeth-1.5-fee0-nonce7",
+      "inputs": {
+        "module": "0x7402a988651bAF0558642647e0D7366D939d35c4",
+        "safe": "0x3333333333333333333333333333333333333333",
+        "token": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+        "amount": "1500000000000000000",
+        "linkSigner": "0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF",
+        "linkSignerTestPrivateKey": "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "feeBps": 0,
+        "nonce": 7,
+        "recipient": "0x4444444444444444444444444444444444444444",
+        "minAmount": "1500000000000000000",
+        "minRefund": "0"
+      },
+      "expected": {
+        "domainSeparator": "0x09b5f40cb9df27bddb041981f6b3293f27f970b2a04cb357d0c7ddba844bebae",
+        "requestLinkMessageHash": "0xe12dc170fc119e30168f4926944442fabc90c7230c93732381b7ef57df992841",
+        "requestLinkDigest": "0xe5847f68607532340e2e7b15886a80726d4e748c90061b67a38ee195621b086f",
+        "requestLinkSignature": "0x43c61f1d36c92ec6eae9440dcef64240099d404adf689ff13d7b89bdfe5e23f41666503917fa1d15fbc4f72db268b5aa8c036e95ee180896877959b4fae490561c",
+        "cancelLinkMessageHash": "0x01a699ec1b745ac942cada3722bda22c6d641b44647b3efc09dfc23f6d135a66",
+        "cancelLinkDigest": "0xd2c8bc255105cb04d9f4fe9027f9e8640f30c14653e695e3f7b62596236bb15d",
+        "claimStructHash": "0x7f4bc97fe9df81bc6cc3f69b58104d2c4bd9dd0321b7795163becb04046387dd",
+        "claimDigest": "0xeb792ad7cabe17ce98107446fbcdc1314f3907994ff8695024a0c1115b02ee14",
+        "claimSignature": "0xb700e19f55dae50cab4e8660dd02a2717609e0707e08b9d764bc067b9d7739a656b44e9283214ef6f8930bcf0065c1dbc5992ab2b6365db29b04fd84ccfd00d41c"
+      }
+    },
+    {
+      "name": "prod-max-fee100-nonce123456",
+      "inputs": {
+        "module": "0x7402a988651bAF0558642647e0D7366D939d35c4",
+        "safe": "0x5555555555555555555555555555555555555555",
+        "token": "0x6666666666666666666666666666666666666666",
+        "amount": "340282366920938463463374607431768211455",
+        "linkSigner": "0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69",
+        "linkSignerTestPrivateKey": "0x0000000000000000000000000000000000000000000000000000000000000003",
+        "feeBps": 100,
+        "nonce": 123456,
+        "recipient": "0x7777777777777777777777777777777777777777",
+        "minAmount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+        "minRefund": "340282366920938463463374607431768211455"
+      },
+      "expected": {
+        "domainSeparator": "0x09b5f40cb9df27bddb041981f6b3293f27f970b2a04cb357d0c7ddba844bebae",
+        "requestLinkMessageHash": "0xd2bdf0e4b03684d980c7f976cf62ca1c9a2a62ad23b574596a11f393460d13d8",
+        "requestLinkDigest": "0xd3744fc80a818b031b2d399e86f6be0e69320028dba8bad8e45bfc6ca00be4e7",
+        "requestLinkSignature": "0x649e31370bfb9637200ef080265883ba2614a3d65c30180315a0b7797380482a4fd22d804ca9029f827ee8f5c5a86d9cedf1fbbddc8ca949d778eccb3f422e231c",
+        "cancelLinkMessageHash": "0x057cbbb5986fe842e8dc0d5c57c1be1740f89b1a0989f24ffe61f65063bb442b",
+        "cancelLinkDigest": "0xfb7feab92e7fa8deaa515f4dd3143f81d34c435302a16e933eb6d6e3c782f564",
+        "claimStructHash": "0x2146cf0e2964c74e6236ec7b1d566e6a0430001b398ecf7f0981db028a9b9dae",
+        "claimDigest": "0xd8dbfeb1d35e9231702956da7dec72ef28a7f967acf9d75d10e764f605ff63b5",
+        "claimSignature": "0xcf70366d3c25001a5fe3b19b139677e0a2a544245e48de0ed4e5cbb39a211a4c76276586a9b51d1b20dcd13b3b53d5557d036f12049727a267d3c30d9d3e9d391b"
+      }
+    }
+  ]
+}
