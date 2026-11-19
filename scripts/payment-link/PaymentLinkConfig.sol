@@ -90,7 +90,7 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
 
     /// @dev The launch tokens, in the order the enable batch allows them.
     function _launchTokens() internal pure returns (address[] memory tokens) {
-        address[118] memory list = [
+        address[119] memory list = [
             // Stablecoins and WETH
             LAUNCH_TOKEN_USDC,
             LAUNCH_TOKEN_EURC,
@@ -129,6 +129,7 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
             0x18423155Ea0F0e3c4FeB7DD4660DDc73799C8890, // wAMBRx
             0xEe7CcB0d37A12862e7f92F6C92a93d9c2d304266, // wAMDx
             0x910cabdE3EBa7Fc1Ce64fD14bD680b9f60fA0F90, // wAMZNx
+            0xabec6AeAb037b77c09a2a99264F9C81a35B02649, // wANTx
             0x6F4C257A2AEA0653C728979D655526393846757c, // wAPPx
             0x9147b03c16B18FC4F686f610f189f91Ddf4347b4, // wASMLx
             0xF724EB71F31f9def5c0B6b5a52457FC7755A936B, // wASTSx

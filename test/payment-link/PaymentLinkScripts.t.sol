@@ -206,10 +206,17 @@ contract PaymentLinkScriptsTest is Test {
     uint256 internal constant REAL_BLOCK_NUMBER = 155_269_969;
     /// @dev The Optimism block just before the dev deployment at the current dev salts, which
     ///      landed in block 159_704_052. The dev deploy tests fork here so they deploy THIS build
-    ///      fresh, whatever build is live at the pinned dev addresses. Every launch token is on the
-    ///      dev CashModule's withdraw-asset list at this block; the earlier dev module, at other
-    ///      salts and addresses, already exists here and is untouched.
+    ///      fresh, whatever build is live at the pinned dev addresses. Every launch token but wANTx
+    ///      is on the dev CashModule's withdraw-asset list at this block, and `_fork` lists wANTx
+    ///      there; the earlier dev module, at other salts and addresses, already exists here and is
+    ///      untouched.
     uint256 internal constant BEFORE_DEV_DEPLOY_BLOCK = 159_704_051;
+    /// @dev The Optimism block just before the prod deployment, whose implementation landed in block
+    ///      159_753_943. The prod tests fork here so they deploy and enable THIS build fresh rather
+    ///      than meet the live deployment at the pinned addresses. Every launch token, wANTx included
+    ///      (listed in block 159_731_794), is on the prod CashModule's withdraw-asset list here.
+    uint256 internal constant BEFORE_PROD_DEPLOY_BLOCK = 159_753_942;
+    address internal constant WANTX = 0xabec6AeAb037b77c09a2a99264F9C81a35B02649;
     bytes32 internal constant EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
     bytes32 internal constant UPGRADEABLE_PROXY_STORAGE_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
     bytes32 internal constant INITIALIZABLE_STORAGE_SLOT = 0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00;
@@ -228,11 +235,12 @@ contract PaymentLinkScriptsTest is Test {
     RoleRegistry internal devRoleRegistry;
 
     function setUp() public {
-        _fork(0);
+        _fork(BEFORE_PROD_DEPLOY_BLOCK);
     }
 
     /// @dev Forks Optimism at `blockNumber` (the latest block when zero) and registers the test
-    ///      deployer on the EtherFiDeployer there.
+    ///      deployer on the EtherFiDeployer there. At `BEFORE_DEV_DEPLOY_BLOCK` it also lists wANTx
+    ///      on the dev CashModule's withdraw-asset list, which a launch token must be on.
     function _fork(uint256 blockNumber) internal {
         string memory rpc = vm.envOr("TEST_RPC", string("https://mainnet.optimism.io"));
         if (blockNumber == 0) vm.createSelectFork(rpc);
@@ -255,6 +263,13 @@ contract PaymentLinkScriptsTest is Test {
         devDataProvider = EtherFiDataProvider(dev.readAddress(".addresses.EtherFiDataProvider"));
         devCashModule = ICashModule(dev.readAddress(".addresses.CashModule"));
         devRoleRegistry = RoleRegistry(dev.readAddress(".addresses.RoleRegistry"));
+
+        if (blockNumber == BEFORE_DEV_DEPLOY_BLOCK) {
+            address[] memory assets = new address[](1);
+            assets[0] = WANTX;
+            vm.prank(devRoleRegistry.roleHolders(devRoleRegistry.ADMIN_ROLE())[0]);
+            devCashModule.configureWithdrawAssets(assets, yes);
+        }
     }
 
     function test_pinnedAddresses_matchSaltsAndDeployer() public view {
@@ -551,8 +566,10 @@ contract PaymentLinkScriptsTest is Test {
 
     /// @dev The deploy tx's block must be this chain's canonical,
     ///      finalized block at its height, older than the reviewed state, and the provenance RPC
-    ///      must follow the chain under review.
+    ///      must follow the chain under review. Forks the latest block: a block a few blocks back is
+    ///      unfinalized only near the live head, which the finality check reads.
     function test_provenance_requiresCanonicalFinalizedAncestorBlock() public {
+        _fork(0);
         ProvenanceProbe probe = new ProvenanceProbe();
         probe.requireCanonical(REAL_BLOCK_HASH, REAL_BLOCK_NUMBER); // control
 
@@ -727,7 +744,7 @@ contract PaymentLinkScriptsTest is Test {
         }
         (address[] memory targets, uint256[] memory values, bytes[] memory payloads) = abi.decode(args, (address[], uint256[], bytes[]));
         address[] memory tokens = new LaunchTokensProbe().launchTokens();
-        assertEq(tokens.length, 118, "launch token count");
+        assertEq(tokens.length, 119, "launch token count");
         assertEq(tokens[0], USDC);
         assertEq(tokens[1], EURC);
         assertEq(tokens[2], USDT0);
