@@ -44,6 +44,7 @@
     "CCTPModule": "0xFEF147ce61614aa787B6E68c24Ff096D13593A9d",
     "StockMigrationModule": "0x15A90D4548bEB6D0f7140c17497F632e329e14dD",
     "StockWrapModule": "0xe7c6a85fA9a8EDf84870e5658a83D94Ed7e09270",
-    "StockBridgeWithdrawModule": "0x2e654540Fec9b409F67c0c0E3Bf3973e6A987482"
+    "StockBridgeWithdrawModule": "0x2e654540Fec9b409F67c0c0E3Bf3973e6A987482",
+    "PaymentLinkModule": "0x7402a988651bAF0558642647e0D7366D939d35c4"
   }
 }
