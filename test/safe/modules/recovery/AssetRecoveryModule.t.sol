@@ -29,11 +29,12 @@ contract NonPayableCaller {
         address recipient,
         bytes32 safeSalt,
         uint32 destEid,
+        uint256 deadline,
         bytes calldata lzOptions,
         address[] calldata signers,
         bytes[] calldata sigs
     ) external payable returns (bytes32) {
-        return module.recover{value: msg.value}(safe, token, recipient, safeSalt, destEid, lzOptions, signers, sigs);
+        return module.recover{value: msg.value}(safe, token, recipient, safeSalt, destEid, deadline, lzOptions, signers, sigs);
     }
 }
 
@@ -46,6 +47,9 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
     address public dispatcher = makeAddr("dispatcher");
     uint32 public constant ARB_EID = 30_110;
     bytes32 public constant SAFE_SALT = bytes32(uint256(0xC0DE));
+
+    /// @dev Never-expiring deadline for tests that don't exercise expiry.
+    uint256 internal constant DEADLINE = type(uint256).max;
 
     function setUp() public override {
         super.setUp();
@@ -88,7 +92,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.recordLogs();
         vm.prank(owner1);
         bytes32 lzGuid = module.recover{value: 1e15}(
-            safeAddr, address(token), recipient, SAFE_SALT, destEid, "", signers, sigs
+            safeAddr, address(token), recipient, SAFE_SALT, destEid, DEADLINE, "", signers, sigs
         );
         assertTrue(lzGuid != bytes32(0), "guid should be non-zero");
 
@@ -125,7 +129,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.deal(owner1, 1 ether);
         vm.prank(owner1);
         vm.expectRevert(IAssetRecoveryModule.InvalidToken.selector);
-        module.recover{value: 1e15}(safeAddr, address(0), makeAddr("recipient"), SAFE_SALT, ARB_EID, "", signers, sigs);
+        module.recover{value: 1e15}(safeAddr, address(0), makeAddr("recipient"), SAFE_SALT, ARB_EID, DEADLINE, "", signers, sigs);
     }
 
     function test_recover_revertsIfRecipientZero() public {
@@ -133,7 +137,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.deal(owner1, 1 ether);
         vm.prank(owner1);
         vm.expectRevert(IAssetRecoveryModule.InvalidRecipient.selector);
-        module.recover{value: 1e15}(safeAddr, address(token), address(0), SAFE_SALT, ARB_EID, "", signers, sigs);
+        module.recover{value: 1e15}(safeAddr, address(token), address(0), SAFE_SALT, ARB_EID, DEADLINE, "", signers, sigs);
     }
 
     function test_recover_revertsIfPeerUnset() public {
@@ -144,7 +148,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.deal(owner1, 1 ether);
         vm.prank(owner1);
         vm.expectRevert(IAssetRecoveryModule.InvalidDestEid.selector);
-        module.recover{value: 1e15}(safeAddr, address(token), makeAddr("recipient"), SAFE_SALT, ARB_EID, "", signers, sigs);
+        module.recover{value: 1e15}(safeAddr, address(token), makeAddr("recipient"), SAFE_SALT, ARB_EID, DEADLINE, "", signers, sigs);
     }
 
     function test_recover_revertsIfBadSignature() public {
@@ -153,7 +157,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.deal(owner1, 1 ether);
         vm.prank(owner1);
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        module.recover{value: 1e15}(safeAddr, address(token), makeAddr("differentRecipient"), SAFE_SALT, ARB_EID, "", signers, sigs);
+        module.recover{value: 1e15}(safeAddr, address(token), makeAddr("differentRecipient"), SAFE_SALT, ARB_EID, DEADLINE, "", signers, sigs);
     }
 
     function test_recover_revertsIfSaltMismatch() public {
@@ -162,7 +166,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.deal(owner1, 1 ether);
         vm.prank(owner1);
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        module.recover{value: 1e15}(safeAddr, address(token), makeAddr("recipient"), bytes32(uint256(0xBADBAD)), ARB_EID, "", signers, sigs);
+        module.recover{value: 1e15}(safeAddr, address(token), makeAddr("recipient"), bytes32(uint256(0xBADBAD)), ARB_EID, DEADLINE, "", signers, sigs);
     }
 
     function test_recover_digestReplayReverts() public {
@@ -171,12 +175,47 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
 
         vm.deal(owner1, 1 ether);
         vm.startPrank(owner1);
-        module.recover{value: 1e15}(safeAddr, address(token), recipient, SAFE_SALT, ARB_EID, "", signers, sigs);
+        module.recover{value: 1e15}(safeAddr, address(token), recipient, SAFE_SALT, ARB_EID, DEADLINE, "", signers, sigs);
 
         // Replay with same sigs — nonce has advanced, digest no longer matches.
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        module.recover{value: 1e15}(safeAddr, address(token), recipient, SAFE_SALT, ARB_EID, "", signers, sigs);
+        module.recover{value: 1e15}(safeAddr, address(token), recipient, SAFE_SALT, ARB_EID, DEADLINE, "", signers, sigs);
         vm.stopPrank();
+    }
+
+    /// @dev I-04 regression (ported from SafeAssetRecoveryModule): an expired deadline must revert
+    ///      before the signature is honoured, so a relayer cannot stash a signed cross-chain recovery
+    ///      and replay it against a future, larger deposit of the same token. Amount is not signed
+    ///      (the dest sweeps the full balance at delivery), and the per-safe nonce only makes a
+    ///      signature single-use — without a deadline it never expires.
+    function test_recover_revertsIfExpired() public {
+        address recipient = makeAddr("recipient");
+        uint256 deadline = block.timestamp + 1 hours;
+
+        bytes32 digest = keccak256(abi.encode(
+            block.chainid,
+            address(module),
+            module.getNonce(safeAddr),
+            safeAddr,
+            address(token),
+            recipient,
+            SAFE_SALT,
+            ARB_EID,
+            deadline,
+            keccak256(bytes(""))
+        ));
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+        bytes[] memory sigs = new bytes[](2);
+        sigs[0] = _signDigest(owner1Pk, digest);
+        sigs[1] = _signDigest(owner2Pk, digest);
+
+        vm.warp(deadline + 1);
+        vm.deal(owner1, 1 ether);
+        vm.prank(owner1);
+        vm.expectRevert(IAssetRecoveryModule.RecoveryExpired.selector);
+        module.recover{value: 1e15}(safeAddr, address(token), recipient, SAFE_SALT, ARB_EID, deadline, "", signers, sigs);
     }
 
     function test_recover_revertsIfLzOptionsMismatch() public {
@@ -192,7 +231,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.prank(owner1);
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
         module.recover{value: 1e15}(
-            safeAddr, address(token), makeAddr("recipient"), SAFE_SALT, ARB_EID, submittedOptions, signers, sigs
+            safeAddr, address(token), makeAddr("recipient"), SAFE_SALT, ARB_EID, DEADLINE, submittedOptions, signers, sigs
         );
     }
 
@@ -205,7 +244,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.prank(owner1);
         // Pinned to OZ Pausable's `EnforcedPause()` — `whenNotPaused` is the first guard.
         vm.expectRevert(bytes4(keccak256("EnforcedPause()")));
-        module.recover{value: 1e15}(safeAddr, address(token), makeAddr("recipient"), SAFE_SALT, ARB_EID, "", signers, sigs);
+        module.recover{value: 1e15}(safeAddr, address(token), makeAddr("recipient"), SAFE_SALT, ARB_EID, DEADLINE, "", signers, sigs);
     }
 
     function test_pause_onlyPauser() public {
@@ -225,7 +264,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         // Our override pins to the same selector.
         vm.expectRevert(abi.encodeWithSelector(OAppSender.NotEnoughNative.selector, 0.05 ether));
         module.recover{value: 0.05 ether}(
-            safeAddr, address(token), makeAddr("recipient"), SAFE_SALT, ARB_EID, "", signers, sigs
+            safeAddr, address(token), makeAddr("recipient"), SAFE_SALT, ARB_EID, DEADLINE, "", signers, sigs
         );
     }
 
@@ -238,7 +277,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         uint256 startBal = owner1.balance;
 
         vm.prank(owner1);
-        module.recover{value: 0.5 ether}(safeAddr, address(token), recipient, SAFE_SALT, ARB_EID, "", signers, sigs);
+        module.recover{value: 0.5 ether}(safeAddr, address(token), recipient, SAFE_SALT, ARB_EID, DEADLINE, "", signers, sigs);
 
         // 0.4 ether refunded; net cost = 0.1 ether (the quoted fee).
         assertEq(owner1.balance, startBal - 0.1 ether, "should be charged exactly the fee");
@@ -257,7 +296,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
 
         vm.expectRevert(IAssetRecoveryModule.RefundFailed.selector);
         caller.callRecover{value: 0.5 ether}(
-            safeAddr, address(token), recipient, SAFE_SALT, ARB_EID, "", signers, sigs
+            safeAddr, address(token), recipient, SAFE_SALT, ARB_EID, DEADLINE, "", signers, sigs
         );
     }
 
@@ -284,6 +323,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
             recipient,
             SAFE_SALT,
             destEid,
+            DEADLINE,
             keccak256(lzOptions)
         ));
 
