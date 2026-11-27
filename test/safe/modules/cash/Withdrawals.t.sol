@@ -948,6 +948,34 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         assertEq(whitelistedModules[0], module);
     }
 
+    /// Removing a module is a fast safety brake for ADMIN_ROLE; adding one still needs the operating timelock.
+    function test_configureModulesCanRequestWithdraw_adminRoleCanRemoveButNotAdd() public {
+        address module = makeAddr("module");
+        address[] memory modules = new address[](1);
+        modules[0] = module;
+        bool[] memory add = new bool[](1);
+        add[0] = true;
+        bool[] memory remove = new bool[](1);
+
+        address adminOnly = makeAddr("adminOnly");
+        vm.startPrank(owner);
+        dataProvider.configureModules(modules, add);
+        roleRegistry.grantRole(roleRegistry.ADMIN_ROLE(), adminOnly);
+        vm.stopPrank();
+
+        vm.prank(adminOnly);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        cashModule.configureModulesCanRequestWithdraw(modules, add);
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, add);
+        assertEq(cashModule.getWhitelistedModulesCanRequestWithdraw().length, 1);
+
+        vm.prank(adminOnly);
+        cashModule.configureModulesCanRequestWithdraw(modules, remove);
+        assertEq(cashModule.getWhitelistedModulesCanRequestWithdraw().length, 0);
+    }
+
     function test_configureModulesCanRequestWithdraw_fails_whenArrayLengthMismatch() public {
         address module = makeAddr("module");
         address[] memory modules = new address[](2);

@@ -19,6 +19,10 @@ contract MockMidasVault is IMidasVault {
         midasToken = MockERC20(_midasToken);
     }
 
+    function mToken() external view returns (address) {
+        return address(midasToken);
+    }
+
     function depositInstant(address tokenIn, uint256 amountToken, uint256, bytes32) external {
         uint256 pull = IERC20(tokenIn).allowance(msg.sender, address(this));
         IERC20(tokenIn).transferFrom(msg.sender, address(this), pull);

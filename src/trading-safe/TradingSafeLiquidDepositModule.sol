@@ -34,7 +34,7 @@ import { ModuleBase } from "../modules/ModuleBase.sol";
 contract TradingSafeLiquidDepositModule is ITradingSafeLiquidDepositModule, ModuleBase, Pausable {
     using MessageHashUtils for bytes32;
 
-    /// @notice Role allowed to add and remove Liquid vault routes.
+    /// @notice Role allowed to remove Liquid vault routes. Adding a route needs ADMIN_TIMELOCK_ROLE.
     bytes32 public constant TRADING_SAFE_LIQUID_DEPOSIT_MODULE_ADMIN = keccak256("TRADING_SAFE_LIQUID_DEPOSIT_MODULE_ADMIN");
 
     /// @notice Configured teller for each Liquid vault share token.
@@ -147,10 +147,10 @@ contract TradingSafeLiquidDepositModule is ITradingSafeLiquidDepositModule, Modu
     }
 
     /// @inheritdoc ITradingSafeLiquidDepositModule
+    /// @dev A new route sends owners' assets to an external vault, so adding one goes through the operating
+    ///      timelock. Removing a route stays with TRADING_SAFE_LIQUID_DEPOSIT_MODULE_ADMIN and has no delay.
     function addLiquidAssets(address[] calldata liquidAssets, address[] calldata tellers) external {
-        if (!_roleRegistry().hasRole(TRADING_SAFE_LIQUID_DEPOSIT_MODULE_ADMIN, msg.sender)) {
-            revert Unauthorized();
-        }
+        _roleRegistry().onlyAdminTimelock(msg.sender);
         _setLiquidAssets(liquidAssets, tellers);
     }
 

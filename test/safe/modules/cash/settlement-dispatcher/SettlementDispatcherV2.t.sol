@@ -55,6 +55,10 @@ contract MockMidasVault is IMidasVault {
         midasToken = IERC20(_midasToken);
     }
 
+    function mToken() external view override returns (address) {
+        return address(midasToken);
+    }
+
     function depositInstant(address, uint256, uint256, bytes32) external pure override {
         revert("MockMidasVault: depositInstant not used");
     }
@@ -86,6 +90,14 @@ contract MockFraxRemoteHop is IFraxRemoteHop {
 
     function quote(address, uint32, bytes32, uint256) external view override returns (MessagingFee memory fee) {
         return MessagingFee({ nativeFee: nativeFeeToReturn, lzTokenFee: 0 });
+    }
+
+    function paused() external pure override returns (bool) {
+        return false;
+    }
+
+    function approvedOft(address) external pure override returns (bool) {
+        return true;
     }
 }
 

@@ -223,12 +223,28 @@ contract TradingSafeLiquidDepositModuleTest is TradingSafeTestBase {
 
     function test_routeAdmin_revertsForUnauthorizedCaller() public {
         vm.prank(makeAddr("random"));
-        vm.expectRevert(ITradingSafeLiquidDepositModule.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.addLiquidAssets(_single(address(liquidBtc)), _single(address(teller)));
 
         vm.prank(makeAddr("random"));
         vm.expectRevert(ITradingSafeLiquidDepositModule.Unauthorized.selector);
         module.removeLiquidAssets(_single(address(liquidBtc)));
+    }
+
+    /// Adding a route needs the operating timelock; the route admin role can only remove routes.
+    function test_routeAdmin_moduleAdminCanRemoveButNotAdd() public {
+        address routeAdmin = makeAddr("routeAdmin");
+        bytes32 moduleAdminRole = module.TRADING_SAFE_LIQUID_DEPOSIT_MODULE_ADMIN();
+        vm.prank(owner);
+        roleRegistry.grantRole(moduleAdminRole, routeAdmin);
+
+        vm.prank(routeAdmin);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        module.addLiquidAssets(_single(address(liquidBtc)), _single(address(teller)));
+
+        vm.prank(routeAdmin);
+        module.removeLiquidAssets(_single(address(liquidBtc)));
+        assertEq(address(module.liquidAssetToTeller(address(liquidBtc))), address(0), "route removed");
     }
 
     function test_routeAdmin_revertsIfTellerVaultMismatch() public {

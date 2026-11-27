@@ -11,6 +11,7 @@ import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ILendGateway } from "../../interfaces/ILendGateway.sol";
+import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
@@ -36,11 +37,27 @@ contract CashModuleSetters is CashModuleStorageContract {
     }
 
     /**
+     * @notice Returns whether the lend gateway may send a safe's withdrawn or borrowed funds to `to`, other than
+     *         the safe itself
+     * @dev Allowed: a configured settlement dispatcher, and for borrows only the DebtManager (migration re-borrow).
+     * @param to The recipient to check
+     * @param isBorrow True for a borrow, false for a withdrawal
+     * @return True if `to` is an allowed recipient
+     */
+    function isAllowedLendRecipient(address to, bool isBorrow) external view returns (bool) {
+        if (to == address(0)) return false;
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        if (to == $.settlementDispatcherReap || to == $.settlementDispatcherRain || to == $.settlementDispatcherPix || to == $.settlementDispatcherCardOrder) return true;
+        return isBorrow && to == address($.debtManager);
+    }
+
+    /**
      * @notice Sets the settlement dispatcher address for a bin sponsor
      * @dev Only callable by the RoleRegistry owner (the upgrade timelock)
      * @param binSponsor Bin sponsor for which the settlement dispatcher is updated
      * @param dispatcher Address of the new settlement dispatcher for the bin sponsor
-     * @custom:throws InvalidInput if caller doesn't have the controller role
+     * @custom:throws OnlyRoleRegistryOwner if the caller is not the RoleRegistry owner
+     * @custom:throws InvalidInput if dispatcher is the zero address
      */
     function setSettlementDispatcher(BinSponsor binSponsor, address dispatcher) external onlyRoleRegistryOwner {
         if (dispatcher == address(0)) revert InvalidInput();
@@ -144,15 +161,16 @@ contract CashModuleSetters is CashModuleStorageContract {
 
     /**
      * @notice Sets the time delays for withdrawals, spending limit changes, and mode changes
-     * @dev Only callable by accounts with ADMIN_ROLE
+     * @dev Only callable by the ADMIN_TIMELOCK_ROLE. These delays protect every user, so changing them goes
+     *      through the operating timelock rather than the fast admin multisig.
      * @param withdrawalDelay Delay in seconds before a withdrawal can be finalized
      * @param spendLimitDelay Delay in seconds before spending limit changes take effect
      * @param modeDelay Delay in seconds before a mode change takes effect
-     * @custom:throws OnlyAdmin if the caller does not have ADMIN_ROLE
+     * @custom:throws OnlyAdminTimelock if the caller does not have ADMIN_TIMELOCK_ROLE
      */
 
     function setDelays(uint64 withdrawalDelay, uint64 spendLimitDelay, uint64 modeDelay) external {
-        roleRegistry().onlyAdmin(msg.sender);
+        roleRegistry().onlyAdminTimelock(msg.sender);
         CashModuleStorage storage $ = _getCashModuleStorage();
 
         $.withdrawalDelay = withdrawalDelay;
@@ -289,24 +307,30 @@ contract CashModuleSetters is CashModuleStorageContract {
 
     /**
      * @notice Configures which modules can request withdrawals
-     * @dev Can only be called by the ADMIN_TIMELOCK_ROLE
+     * @dev Adding a module needs the ADMIN_TIMELOCK_ROLE. A call that only removes modules is safety-increasing,
+     *      so the ADMIN_ROLE can also make it with no delay, to cut a misbehaving module quickly.
      * @param modules Array of module addresses to configure
      * @param shouldWhitelist Array of boolean values indicating whether to whitelist each module
      */
     function configureModulesCanRequestWithdraw(address[] calldata modules, bool[] calldata shouldWhitelist) external {
-        roleRegistry().onlyAdminTimelock(msg.sender);
-
         CashModuleStorage storage $ = _getCashModuleStorage();
 
         uint256 len = modules.length;
         if (len == 0 || len != shouldWhitelist.length) revert ArrayLengthMismatch();
 
+        bool adds;
         for (uint256 i = 0; i < len;) {
-            if (shouldWhitelist[i] && !etherFiDataProvider.isWhitelistedModule(modules[i])) revert ModuleNotWhitelistedOnDataProvider();
+            if (shouldWhitelist[i]) {
+                adds = true;
+                if (!etherFiDataProvider.isWhitelistedModule(modules[i])) revert ModuleNotWhitelistedOnDataProvider();
+            }
             unchecked {
                 ++i;
             }
         }
+
+        IRoleRegistry registry = roleRegistry();
+        if (adds || !registry.hasRole(registry.ADMIN_ROLE(), msg.sender)) registry.onlyAdminTimelock(msg.sender);
 
         EnumerableAddressWhitelistLib.configure($.whitelistedModulesCanRequestWithdraw, modules, shouldWhitelist);
         $.cashEventEmitter.emitModulesCanRequestWithdrawConfigured(modules, shouldWhitelist);

@@ -38,4 +38,10 @@ interface IMidasVault {
      * @return request id
      */
     function redeemRequest(address tokenOut, uint256 amountMTokenIn, address recipient) external returns (uint256);
+
+    /**
+     * @notice The mToken this vault deposits into or redeems from
+     * @return mToken address
+     */
+    function mToken() external view returns (address);
 }
