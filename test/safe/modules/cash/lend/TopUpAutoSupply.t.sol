@@ -44,7 +44,7 @@ contract TopUpAutoSupplyTest is CashGatewayTestSetup {
         deal(address(usdc), address(topUpDest), TOP_UP_USDC);
 
         vm.expectEmit(true, true, true, true);
-        emit TopUpDest.TopUp(topUpDest.getTxId(SRC_TX_HASH, address(safe), address(usdc)), address(safe), address(usdc), SRC_TX_HASH, SRC_CHAIN_ID, TOP_UP_USDC);
+        emit TopUpDest.TopUp(topUpDest.getChainAwareTxId(SRC_CHAIN_ID, SRC_TX_HASH, address(safe), address(usdc)), address(safe), address(usdc), SRC_TX_HASH, SRC_CHAIN_ID, TOP_UP_USDC);
         vm.prank(topUpKeeper);
         topUpDest.topUpUserSafe(SRC_TX_HASH, address(safe), SRC_CHAIN_ID, address(usdc), TOP_UP_USDC);
 
@@ -115,7 +115,7 @@ contract TopUpAutoSupplyTest is CashGatewayTestSetup {
         topUpDest.topUpUserSafe(SRC_TX_HASH, address(safe), SRC_CHAIN_ID, address(usdc), TOP_UP_USDC);
 
         assertEq(usdc.balanceOf(address(safe)), TOP_UP_USDC, "topup stayed loose");
-        assertTrue(topUpDest.isTransactionCompleted(SRC_TX_HASH, address(safe), address(usdc)), "topup marked processed");
+        assertTrue(topUpDest.isChainAwareTransactionCompleted(SRC_CHAIN_ID, SRC_TX_HASH, address(safe), address(usdc)), "topup marked processed");
     }
 
     /// Same when TopUpDest is not (or no longer) an authorized driver.
