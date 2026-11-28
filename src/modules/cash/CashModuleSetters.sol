@@ -257,7 +257,7 @@ contract CashModuleSetters is CashModuleStorageContract {
         // from loose balances instead of pulling from the lend market
         CashLendLib.processLendOptOutIfReady($, safe);
 
-        _requestWithdrawal(safe, tokens, amounts, recipient, $.withdrawalDelay);
+        _requestWithdrawal(safe, tokens, amounts, recipient, $.withdrawalDelay, false);
     }
 
     /**
@@ -284,7 +284,7 @@ contract CashModuleSetters is CashModuleStorageContract {
 
         address recipient = msg.sender; // The module itself is the recipient
 
-        _requestWithdrawal(safe, tokens, amounts, recipient, _withdrawalDelayForModule($, msg.sender));
+        _requestWithdrawal(safe, tokens, amounts, recipient, _withdrawalDelayForModule($, msg.sender), true);
     }
 
     /**
@@ -339,7 +339,7 @@ contract CashModuleSetters is CashModuleStorageContract {
         if ($$.pendingWithdrawalRequest.tokens.length == 0) revert WithdrawalDoesNotExist();
 
         // Ensure that the module that requested the withdrawal is the one cancelling it
-        if ($.whitelistedModulesCanRequestWithdraw.contains($$.pendingWithdrawalRequest.recipient)) revert InvalidWithdrawRequest();
+        if (CashLendLib.isModuleWithdrawal($, safe)) revert InvalidWithdrawRequest();
 
         CashVerificationLib.verifyCancelWithdrawalSig(safe, IEtherFiSafe(safe).useNonce(), signers, signatures);
         _cancelOldWithdrawal(safe);
@@ -347,7 +347,8 @@ contract CashModuleSetters is CashModuleStorageContract {
 
     /**
      * @notice Cancels a pending withdrawal request by the module
-     * @dev Only callable by whitelisted modules that requested the withdrawal
+     * @dev Only callable by the module that requested the withdrawal, including after governance removed it from
+     *      either whitelist
      * @param safe Address of the EtherFi Safe
      */
     function cancelWithdrawalByModule(address safe) external onlyEtherFiSafe(safe) {
@@ -355,9 +356,11 @@ contract CashModuleSetters is CashModuleStorageContract {
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
 
         if ($$.pendingWithdrawalRequest.tokens.length == 0) revert WithdrawalDoesNotExist();
-        if (!$.whitelistedModulesCanRequestWithdraw.contains($$.pendingWithdrawalRequest.recipient)) revert InvalidWithdrawRequest();
+        if (!CashLendLib.isModuleWithdrawal($, safe)) revert InvalidWithdrawRequest();
         if (msg.sender != $$.pendingWithdrawalRequest.recipient) revert OnlyModuleThatRequestedCanCancel();
-        if (!etherFiDataProvider.isWhitelistedModule(msg.sender)) revert ModuleNotWhitelistedOnDataProvider();
+        // A request recorded as the module's own stays cancellable by it after governance removes the module;
+        // one without the record still needs the module on the DataProvider whitelist, as before
+        if (!$$.withdrawalRequestedByModule && !etherFiDataProvider.isWhitelistedModule(msg.sender)) revert ModuleNotWhitelistedOnDataProvider();
 
         _cancelOldWithdrawal(safe);
     }
@@ -420,11 +423,12 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param amounts Array of token amounts to withdraw
      * @param recipient Address to receive the withdrawn tokens
      * @param withdrawalDelay Delay to apply to this request
+     * @param requestedByModule True when the recipient module places the request (requestWithdrawalByModule)
      * @custom:throws RecipientCannotBeAddressZero if recipient is the zero address
      * @custom:throws InvalidInput if tokens is empty
      * @custom:throws AmountZero if every amount is zero
      */
-    function _requestWithdrawal(address safe, address[] memory tokens, uint256[] memory amounts, address recipient, uint64 withdrawalDelay) internal {
+    function _requestWithdrawal(address safe, address[] memory tokens, uint256[] memory amounts, address recipient, uint64 withdrawalDelay, bool requestedByModule) internal {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
 
@@ -446,6 +450,7 @@ contract CashModuleSetters is CashModuleStorageContract {
         _checkBalance(safe, tokens, amounts);
 
         $$.pendingWithdrawalRequest = WithdrawalRequest({ tokens: tokens, amounts: amounts, recipient: recipient, finalizeTime: finalTime });
+        $$.withdrawalRequestedByModule = requestedByModule;
         $.cashEventEmitter.emitWithdrawalRequested(safe, tokens, amounts, recipient, finalTime);
 
         // Legacy safes only: their loose tokens are DebtManager collateral, so a withdrawal can worsen the
